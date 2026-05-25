@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Get-ChildItem -Path 'C:\\\\Users\\\\34134\\\\Desktop\\\\数字人项目' -ErrorAction SilentlyContinue | Select-Object Name, Length\")",
+      "Bash(python -m compileall . -q)",
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Bash(ffmpeg -version)",
+      "Bash(powershell *)",
+      "Bash(\"C:\\\\Users\\\\34134\\\\AppData\\\\Local\\\\Microsoft\\\\WinGet\\\\Packages\\\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\\\ffmpeg-8.1.1-full_build\\\\bin\\\\ffmpeg.exe\" -version)",
+      "Bash(where ffprobe *)",
+      "Bash(where ffmpeg *)"
+    ]
+  }
+}

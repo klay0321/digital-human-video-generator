@@ -1,0 +1,4 @@
+model = "gpt-5.5"
+model_provider = "company-relay"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"

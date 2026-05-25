@@ -1,0 +1,41 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# python env/cache
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# outputs / logs / generated files
+outputs/
+logs/
+*.log
+_cleanup_archive/
+
+# large media
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.wav
+*.mp3
+*.m4a
+
+# packages / archives
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# node
+node_modules/
+
+# system
+.DS_Store
+Thumbs.db

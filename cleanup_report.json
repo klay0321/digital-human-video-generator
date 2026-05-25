@@ -1,0 +1,697 @@
+{
+  "scan_time": "2026-05-24T23:28:39",
+  "project_root": "C:\\Users\\34134\\Desktop\\数字人项目",
+  "safe_cleanup_items": [
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\streamlit_start_8503.err.log",
+      "rel_path": "streamlit_start_8503.err.log",
+      "kind": "file",
+      "category": "logs",
+      "size_bytes": 213,
+      "modified_time": "2026-05-24T23:03:13",
+      "action": "archive",
+      "reason": "普通日志文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\streamlit_start_8503.out.log",
+      "rel_path": "streamlit_start_8503.out.log",
+      "kind": "file",
+      "category": "logs",
+      "size_bytes": 180,
+      "modified_time": "2026-05-24T22:43:50",
+      "action": "archive",
+      "reason": "普通日志文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\streamlit_start_8504.err.log",
+      "rel_path": "streamlit_start_8504.err.log",
+      "kind": "file",
+      "category": "logs",
+      "size_bytes": 64,
+      "modified_time": "2026-05-24T23:06:17",
+      "action": "archive",
+      "reason": "普通日志文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\streamlit_start_8504.out.log",
+      "rel_path": "streamlit_start_8504.out.log",
+      "kind": "file",
+      "category": "logs",
+      "size_bytes": 180,
+      "modified_time": "2026-05-24T23:06:18",
+      "action": "archive",
+      "reason": "普通日志文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\outputs\\_ffmpeg_card_probe.jpg",
+      "rel_path": "outputs/_ffmpeg_card_probe.jpg",
+      "kind": "file",
+      "category": "outputs_temp_media",
+      "size_bytes": 4723,
+      "modified_time": "2026-05-21T01:11:47",
+      "action": "archive",
+      "reason": "outputs 根目录临时媒体文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\outputs\\_rounded_probe.jpg",
+      "rel_path": "outputs/_rounded_probe.jpg",
+      "kind": "file",
+      "category": "outputs_temp_media",
+      "size_bytes": 1585,
+      "modified_time": "2026-05-21T01:21:50",
+      "action": "archive",
+      "reason": "outputs 根目录临时媒体文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\__pycache__",
+      "rel_path": "__pycache__",
+      "kind": "directory",
+      "category": "python_cache",
+      "size_bytes": 197742,
+      "modified_time": "2026-05-24T23:28:03",
+      "action": "archive",
+      "reason": "Python/工具缓存目录。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\__pycache__\\app.cpython-313.pyc",
+      "rel_path": "__pycache__/app.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 86162,
+      "modified_time": "2026-05-24T23:28:03",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\__pycache__\\pipeline.cpython-313.pyc",
+      "rel_path": "__pycache__/pipeline.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 111580,
+      "modified_time": "2026-05-24T23:28:03",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__",
+      "rel_path": "scripts/__pycache__",
+      "kind": "directory",
+      "category": "python_cache",
+      "size_bytes": 158858,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python/工具缓存目录。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\audit_knowledge_plan_quality.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/audit_knowledge_plan_quality.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 33928,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\cleanup_project.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/cleanup_project.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 35118,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\probe_seedance_i2v_models.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/probe_seedance_i2v_models.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 8413,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\probe_seedance_models.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/probe_seedance_models.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 6630,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\repair_knowledge_plan.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/repair_knowledge_plan.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 10836,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\run_short_render_once.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/run_short_render_once.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 3150,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_dynamic_avatar_overlay.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_dynamic_avatar_overlay.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 4165,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_elevenlabs_clone.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_elevenlabs_clone.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 4401,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_generate_plan_no_prompt_leak.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_generate_plan_no_prompt_leak.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 7705,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_knowledge_modules.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_knowledge_modules.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 11869,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_llm_env.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_llm_env.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 1281,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_llm_json_parse.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_llm_json_parse.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 3426,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_llm_once.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_llm_once.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 1978,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_seedance_capability.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_seedance_capability.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 12471,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_seedance_env.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_seedance_env.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 1387,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_seedance_i2v_once.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_seedance_i2v_once.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 3186,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_seedance_lipsync_with_url.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_seedance_lipsync_with_url.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 6029,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__\\test_seedance_t2v_virtual_once.cpython-313.pyc",
+      "rel_path": "scripts/__pycache__/test_seedance_t2v_virtual_once.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 2885,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__",
+      "rel_path": "services/__pycache__",
+      "kind": "directory",
+      "category": "python_cache",
+      "size_bytes": 208958,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python/工具缓存目录。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\__init__.cpython-313.pyc",
+      "rel_path": "services/__pycache__/__init__.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 119,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\audio_sample_extractor.cpython-313.pyc",
+      "rel_path": "services/__pycache__/audio_sample_extractor.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 15731,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\ffmpeg_utils.cpython-313.pyc",
+      "rel_path": "services/__pycache__/ffmpeg_utils.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 6199,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\knowledge_planner.cpython-313.pyc",
+      "rel_path": "services/__pycache__/knowledge_planner.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 80639,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\layout_engine.cpython-313.pyc",
+      "rel_path": "services/__pycache__/layout_engine.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 11499,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\layout_preview.cpython-313.pyc",
+      "rel_path": "services/__pycache__/layout_preview.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 4764,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\llm_client.cpython-313.pyc",
+      "rel_path": "services/__pycache__/llm_client.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 10770,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\seedance_client.cpython-313.pyc",
+      "rel_path": "services/__pycache__/seedance_client.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 34963,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\streamlit_compat.cpython-313.pyc",
+      "rel_path": "services/__pycache__/streamlit_compat.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 1059,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\stt_service.cpython-313.pyc",
+      "rel_path": "services/__pycache__/stt_service.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 4067,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\subtitle_utils.cpython-313.pyc",
+      "rel_path": "services/__pycache__/subtitle_utils.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 10275,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\tts_elevenlabs.cpython-313.pyc",
+      "rel_path": "services/__pycache__/tts_elevenlabs.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 3469,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\video_composer.cpython-313.pyc",
+      "rel_path": "services/__pycache__/video_composer.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 15976,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\voice_clone_elevenlabs.cpython-313.pyc",
+      "rel_path": "services/__pycache__/voice_clone_elevenlabs.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 7855,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__\\voice_style.cpython-313.pyc",
+      "rel_path": "services/__pycache__/voice_style.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 1573,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\digital_human\\__pycache__",
+      "rel_path": "services/digital_human/__pycache__",
+      "kind": "directory",
+      "category": "python_cache",
+      "size_bytes": 49285,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python/工具缓存目录。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\digital_human\\__pycache__\\__init__.cpython-313.pyc",
+      "rel_path": "services/digital_human/__pycache__/__init__.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 1112,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\digital_human\\__pycache__\\base.cpython-313.pyc",
+      "rel_path": "services/digital_human/__pycache__/base.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 1661,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\digital_human\\__pycache__\\digital_human_service.cpython-313.pyc",
+      "rel_path": "services/digital_human/__pycache__/digital_human_service.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 2986,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\digital_human\\__pycache__\\seedance_i2v_provider.cpython-313.pyc",
+      "rel_path": "services/digital_human/__pycache__/seedance_i2v_provider.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 29530,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\digital_human\\__pycache__\\seedance_t2v_provider.cpython-313.pyc",
+      "rel_path": "services/digital_human/__pycache__/seedance_t2v_provider.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 12991,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\digital_human\\__pycache__\\static_avatar_provider.cpython-313.pyc",
+      "rel_path": "services/digital_human/__pycache__/static_avatar_provider.cpython-313.pyc",
+      "kind": "file",
+      "category": "python_cache",
+      "size_bytes": 1005,
+      "modified_time": "2026-05-24T23:28:04",
+      "action": "archive",
+      "reason": "Python 编译缓存文件。",
+      "risk": "low"
+    }
+  ],
+  "needs_confirmation_items": [],
+  "keep_items": [
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\outputs\\20260521_204130_c36403",
+      "rel_path": "outputs/20260521_204130_c36403",
+      "kind": "directory",
+      "category": "outputs_recent_project",
+      "size_bytes": 42115005,
+      "modified_time": "2026-05-21T23:52:33",
+      "action": "keep",
+      "reason": "最近 2 个输出项目，建议保留。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目\\outputs\\20260521_231438_612de1",
+      "rel_path": "outputs/20260521_231438_612de1",
+      "kind": "directory",
+      "category": "outputs_recent_project",
+      "size_bytes": 54927749,
+      "modified_time": "2026-05-21T23:28:20",
+      "action": "keep",
+      "reason": "最近 2 个输出项目，建议保留。",
+      "risk": "low"
+    },
+    {
+      "path": "C:\\Users\\34134\\Desktop\\数字人项目_boss_demo_20260522.zip",
+      "rel_path": "C:\\Users\\34134\\Desktop\\数字人项目_boss_demo_20260522.zip",
+      "kind": "file",
+      "category": "zip",
+      "size_bytes": 137749,
+      "modified_time": "2026-05-22T01:04:44",
+      "action": "keep",
+      "reason": "最新老板交付 zip，建议保留。",
+      "risk": "low"
+    }
+  ],
+  "large_files": [],
+  "outputs": {
+    "exists": true,
+    "kept_recent_project_dirs": [
+      "outputs/20260521_204130_c36403",
+      "outputs/20260521_231438_612de1"
+    ],
+    "safe_old_project_dirs": [],
+    "confirm_project_dirs_with_final_videos": [],
+    "cache_or_probe_dirs": [],
+    "other_output_items": [
+      "outputs/_ffmpeg_card_probe.jpg",
+      "outputs/_rounded_probe.jpg"
+    ]
+  },
+  "zip_files": {
+    "latest_boss_demo_zip": "C:\\Users\\34134\\Desktop\\数字人项目_boss_demo_20260522.zip",
+    "items": [
+      {
+        "path": "C:\\Users\\34134\\Desktop\\数字人项目_boss_demo_20260522.zip",
+        "rel_path": "C:\\Users\\34134\\Desktop\\数字人项目_boss_demo_20260522.zip",
+        "size_bytes": 137749,
+        "size_human": "134.52 KB",
+        "modified_time": "2026-05-22T01:04:44",
+        "suggested_action": "keep",
+        "reason": "最新老板交付 zip，建议保留。"
+      }
+    ]
+  },
+  "estimated_reclaimable_bytes": 1236631,
+  "estimated_reclaimable_human": "1.18 MB",
+  "risk_notes": [
+    "dry-run 不会移动或删除任何文件。",
+    "archive 模式只移动 safe_cleanup_items 到 _cleanup_archive，不永久删除。",
+    "清理 seedance_cache 后，未来再次生成数字人可能重新调用 Seedance API。",
+    "带 final_videos 的历史项目已放入 needs_confirmation，避免误删有价值 demo 结果。",
+    "源码、prompt、services、核心 scripts、.env 和可运行配置均受保护。"
+  ],
+  "archive_result": {
+    "archive_dir": "C:\\Users\\34134\\Desktop\\数字人项目\\_cleanup_archive\\20260524_232841",
+    "moved_count": 6,
+    "moved_size_bytes": 621151,
+    "moved_size_human": "606.59 KB",
+    "moved": [
+      {
+        "from": "C:\\Users\\34134\\Desktop\\数字人项目\\__pycache__",
+        "to": "C:\\Users\\34134\\Desktop\\数字人项目\\_cleanup_archive\\20260524_232841\\__pycache__",
+        "size_bytes": 197742
+      },
+      {
+        "from": "C:\\Users\\34134\\Desktop\\数字人项目\\scripts\\__pycache__",
+        "to": "C:\\Users\\34134\\Desktop\\数字人项目\\_cleanup_archive\\20260524_232841\\scripts\\__pycache__",
+        "size_bytes": 158858
+      },
+      {
+        "from": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\__pycache__",
+        "to": "C:\\Users\\34134\\Desktop\\数字人项目\\_cleanup_archive\\20260524_232841\\services\\__pycache__",
+        "size_bytes": 208958
+      },
+      {
+        "from": "C:\\Users\\34134\\Desktop\\数字人项目\\outputs\\_rounded_probe.jpg",
+        "to": "C:\\Users\\34134\\Desktop\\数字人项目\\_cleanup_archive\\20260524_232841\\outputs\\_rounded_probe.jpg",
+        "size_bytes": 1585
+      },
+      {
+        "from": "C:\\Users\\34134\\Desktop\\数字人项目\\outputs\\_ffmpeg_card_probe.jpg",
+        "to": "C:\\Users\\34134\\Desktop\\数字人项目\\_cleanup_archive\\20260524_232841\\outputs\\_ffmpeg_card_probe.jpg",
+        "size_bytes": 4723
+      },
+      {
+        "from": "C:\\Users\\34134\\Desktop\\数字人项目\\services\\digital_human\\__pycache__",
+        "to": "C:\\Users\\34134\\Desktop\\数字人项目\\_cleanup_archive\\20260524_232841\\services\\digital_human\\__pycache__",
+        "size_bytes": 49285
+      }
+    ],
+    "errors": [
+      {
+        "path": "C:\\Users\\34134\\Desktop\\数字人项目\\streamlit_start_8503.out.log",
+        "error": "[WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\\\Users\\\\34134\\\\Desktop\\\\数字人项目\\\\streamlit_start_8503.out.log'"
+      },
+      {
+        "path": "C:\\Users\\34134\\Desktop\\数字人项目\\streamlit_start_8503.err.log",
+        "error": "[WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\\\Users\\\\34134\\\\Desktop\\\\数字人项目\\\\streamlit_start_8503.err.log'"
+      },
+      {
+        "path": "C:\\Users\\34134\\Desktop\\数字人项目\\streamlit_start_8504.err.log",
+        "error": "[WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\\\Users\\\\34134\\\\Desktop\\\\数字人项目\\\\streamlit_start_8504.err.log'"
+      },
+      {
+        "path": "C:\\Users\\34134\\Desktop\\数字人项目\\streamlit_start_8504.out.log",
+        "error": "[WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\\\Users\\\\34134\\\\Desktop\\\\数字人项目\\\\streamlit_start_8504.out.log'"
+      }
+    ]
+  }
+}
