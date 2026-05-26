@@ -217,10 +217,20 @@ def audit(project_dir):
     project_dir = Path(project_dir)
     km_path = project_dir / "knowledge_modules.json"
     rp_path = project_dir / "selected_render_plan.json"
+    video_topics_path = project_dir / "video_topics.json"
+    render_jobs_path = project_dir / "render_jobs.json"
+    selected_render_jobs_path = project_dir / "selected_render_jobs.json"
+    cleaning_report_path = project_dir / "cleaning_report.json"
+    report_json_path = project_dir / "report.json"
     if not km_path.exists():
         raise FileNotFoundError(km_path)
     plan = _load_json(km_path)
     render_plan = _load_json(rp_path) if rp_path.exists() else {}
+    video_topics_doc = _load_json(video_topics_path) if video_topics_path.exists() else {}
+    render_jobs_doc = _load_json(render_jobs_path) if render_jobs_path.exists() else {}
+    selected_render_jobs_doc = _load_json(selected_render_jobs_path) if selected_render_jobs_path.exists() else {}
+    cleaning_report = _load_json(cleaning_report_path) if cleaning_report_path.exists() else {}
+    project_report = _load_json(report_json_path) if report_json_path.exists() else {}
 
     if not isinstance(plan, dict):
         plan = {"knowledge_points": [], "big_hooks": [], "assembly_paths": [], "discarded_content": []}
@@ -448,8 +458,105 @@ def audit(project_dir):
     voice_rewrite_kps = [kp for kp in kp_reports if kp["voice_script_score"] < 75]
     weak_paths = [p for p in path_reports if p["issues"]]
 
+    # New product-shape metrics (round-3): cap, video_topics, render_jobs,
+    # cleaning_report and plan-reusability.
+    video_topics = (
+        plan.get("video_topics")
+        or video_topics_doc.get("video_topics")
+        or []
+    )
+    video_topics_count = len(video_topics)
+    kp_cap_summary = plan.get("kp_cap_summary") or {}
+    user_visible_ids = plan.get("user_visible_kp_ids") or kp_cap_summary.get("user_visible_kp_ids") or []
+    user_visible_option_count = (
+        kp_cap_summary.get("user_visible_count")
+        or len(user_visible_ids)
+        or video_topics_count
+    )
+    valid_kp_durations = []
+    too_small_kp_count = 0
+    too_small_visible_kp_ids = []
+    for kp_item in kps:
+        dur = float(kp_item.get("duration") or calculate_kp_duration(kp_item) or 0)
+        if dur > 0:
+            valid_kp_durations.append(dur)
+        if dur < 15 and kp_item.get("visibility") != "advanced":
+            too_small_kp_count += 1
+            kid = kp_item.get("kp_id")
+            if kid:
+                too_small_visible_kp_ids.append(kid)
+    avg_kp_duration = round(sum(valid_kp_durations) / len(valid_kp_durations), 2) if valid_kp_durations else 0.0
+
+    render_jobs_list = render_jobs_doc.get("render_jobs") or []
+    render_job_count = len(render_jobs_list)
+    render_jobs_kp_count_ok = True
+    render_jobs_with_bad_count = []
+    for job in render_jobs_list:
+        cnt = len(job.get("selected_kp_ids") or [])
+        if cnt < 3 or cnt > 6:
+            render_jobs_kp_count_ok = False
+            render_jobs_with_bad_count.append({"job_id": job.get("job_id"), "kp_count": cnt})
+
+    plan_reusable = bool(
+        render_jobs_doc.get("plan_reusable")
+        or project_report.get("plan_reusable")
+        or (render_job_count > 0 and km_path.exists() and (project_dir / "clips.json").exists())
+    )
+    planning_input_text = (
+        cleaning_report.get("planning_input_text")
+        or project_report.get("planning_input_text")
+        or "cleaned_segments"
+    )
+    raw_text_used_for_planning = bool(
+        cleaning_report.get("raw_text_used_for_planning")
+        or project_report.get("raw_text_used_for_planning", False)
+    )
+    selected_render_jobs_exists = selected_render_jobs_path.exists() and bool(selected_render_jobs_doc.get("render_jobs"))
+
+    # Sanity: 普通用户可见选项必须 ≤10（10/18/25 三档 cap，但暴露给用户选择的应是 video_topics）。
+    fragments_visible_to_user = False  # planner 不再暴露 fragments，但 audit 仍校验
+    if user_visible_option_count > 25:
+        fragments_visible_to_user = True
+
+    new_metrics = {
+        "user_visible_option_count": int(user_visible_option_count),
+        "video_topics_count": int(video_topics_count),
+        "render_job_count": int(render_job_count),
+        "avg_kp_duration": avg_kp_duration,
+        "too_small_kp_count": int(too_small_kp_count),
+        "too_small_visible_kp_ids": too_small_visible_kp_ids,
+        "render_jobs_kp_count_ok": render_jobs_kp_count_ok,
+        "render_jobs_with_bad_count": render_jobs_with_bad_count,
+        "plan_reusable": bool(plan_reusable),
+        "planning_input_text": planning_input_text,
+        "raw_text_used_for_planning": raw_text_used_for_planning,
+        "selected_render_jobs_exists": bool(selected_render_jobs_exists),
+        "fragments_visible_to_user": bool(fragments_visible_to_user),
+        "cleaning_report_present": bool(cleaning_report),
+        "kp_cap_summary": kp_cap_summary,
+    }
+
+    # Suggestions tied to the new metrics
+    if video_topics_count == 0:
+        suggestions.append("缺少 video_topics，请重新生成内容计划。")
+    elif video_topics_count > 10:
+        suggestions.append(f"video_topics 数量 {video_topics_count} > 10，建议合并相近方案。")
+    if user_visible_option_count > 25:
+        suggestions.append(f"用户可见选项 {user_visible_option_count} > 25，超出 cap，请检查 kp_cap。")
+    if too_small_kp_count > 0:
+        suggestions.append(f"{too_small_kp_count} 个用户可见 kp 时长 < 15s，请合并或标记 advanced。")
+    if not render_jobs_kp_count_ok:
+        suggestions.append("某些 render_job 的 selected_kp_ids 数量不在 3–6 区间。")
+    if not plan_reusable:
+        suggestions.append("plan_reusable=false，可能缺少 render_jobs.json 或内容计划文件不完整。")
+    if planning_input_text != "cleaned_segments":
+        suggestions.append(f"planning_input_text={planning_input_text}，应为 cleaned_segments。")
+    if raw_text_used_for_planning:
+        suggestions.append("raw_text_used_for_planning=true，意味着规划阶段读到了原文，请检查清洗链路。")
+
     report = {
         "project_dir": str(project_dir),
+        **new_metrics,
         "scores": {
             "overall_score": overall_score,
             "hook_quality_score": hook_quality_score,
@@ -520,6 +627,17 @@ def write_reports(project_dir, report):
         "",
         "## Key Metrics",
         f"- knowledge_point_count: {report['knowledge_point_count']}",
+        f"- user_visible_option_count: {report.get('user_visible_option_count', 0)}",
+        f"- video_topics_count: {report.get('video_topics_count', 0)}",
+        f"- render_job_count: {report.get('render_job_count', 0)}",
+        f"- avg_kp_duration: {report.get('avg_kp_duration', 0)}",
+        f"- too_small_kp_count: {report.get('too_small_kp_count', 0)}",
+        f"- render_jobs_kp_count_ok: {report.get('render_jobs_kp_count_ok', True)}",
+        f"- plan_reusable: {report.get('plan_reusable', False)}",
+        f"- planning_input_text: {report.get('planning_input_text', '?')}",
+        f"- raw_text_used_for_planning: {report.get('raw_text_used_for_planning', False)}",
+        f"- selected_render_jobs_exists: {report.get('selected_render_jobs_exists', False)}",
+        f"- cleaning_report_present: {report.get('cleaning_report_present', False)}",
         f"- invalid_fragment_count: {report['invalid_fragment_count']}",
         f"- assembly_path_avg_length: {report['assembly_path_avg_length']}",
         f"- subtitles_derived_from_voice_script_ratio: {report['subtitles_derived_from_voice_script_ratio']}",
