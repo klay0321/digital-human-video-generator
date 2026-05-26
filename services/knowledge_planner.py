@@ -23,14 +23,21 @@ LLM_REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "120"
 PLANNING_MAX_TOTAL_SECONDS = int(os.getenv("PLANNING_MAX_TOTAL_SECONDS", "900") or 900)
 
 # Common Chinese fillers used by the deterministic fallback cleaner.
+# Order matters: put longer phrases first so the regex consumes them before the
+# shorter overlapping tokens (e.g. "然后然后" before "然后", "就是说" before "就是").
 _FILLERS = (
-    "嗯", "啊", "呃", "哎", "唉", "诶",
-    "这个", "那个", "然后呢", "就是说", "就是", "那么",
-    "对吧", "是吧", "你知道吧", "你懂的",
+    "好的好的", "然后然后", "然后呢", "就是说", "其实就是", "差不多",
+    "你知道吧", "你知道", "你懂的", "对吧", "是吧", "明白吧",
+    "这种东西", "啥的",
+    "这个", "那个", "那么",
+    "嗯", "啊", "额", "呃", "哎", "唉", "诶", "就是",
 )
 
 # Compile a single regex for fast cleaning.
 _FILLER_RE = re.compile("|".join(re.escape(f) for f in _FILLERS))
+# Detects 2+ char duplicate runs ("好的好的", "明白明白", "然后然后") even when
+# the duplicate is not a literal known filler.
+_REPETITION_RE = re.compile(r"([一-鿿A-Za-z0-9]{1,5})\1+")
 
 # Default lightweight topic keywords for deterministic clustering when the
 # LLM isn't available. Map: lowercased Chinese/English keyword -> topic_key.
@@ -75,8 +82,72 @@ def _basic_clean(text):
     if not text:
         return ""
     cleaned = _FILLER_RE.sub("", text)
+    cleaned = _REPETITION_RE.sub(r"\1", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+
+def _count_cleaning_changes(raw, cleaned):
+    """Return (removed_filler_count, removed_repetition_count) for one pair."""
+    raw = raw or ""
+    if not raw:
+        return 0, 0
+    filler_count = sum(1 for _ in _FILLER_RE.finditer(raw))
+    repetition_count = 0
+    for match in _REPETITION_RE.finditer(raw):
+        group = match.group(0)
+        token = match.group(1)
+        if token:
+            repetition_count += max(0, (len(group) // len(token)) - 1)
+    return filler_count, repetition_count
+
+
+def build_cleaning_report(transcript_segments, cleaned_segments, max_examples=5):
+    """Aggregate raw vs cleaned statistics into a cleaning_report payload.
+
+    This runs *after* clean_transcript_segments_with_llm (or the deterministic
+    fallback) so we can attribute the observed delta to whichever cleaner ran.
+    The report is meant to be serialised verbatim as cleaning_report.json.
+    """
+    raw_text_total = "".join((s.get("text") or "") for s in (transcript_segments or []))
+    cleaned_text_total = "".join((s.get("clean_text") or "") for s in (cleaned_segments or []))
+    raw_chars = len(raw_text_total)
+    cleaned_chars = len(cleaned_text_total)
+    total_filler = 0
+    total_repetition = 0
+    examples = []
+    # Align by segment_id when available, otherwise by index. We only need
+    # rough counts so an off-by-one alignment is acceptable.
+    cleaned_by_index = list(cleaned_segments or [])
+    for idx, raw_seg in enumerate(transcript_segments or []):
+        raw_seg_text = (raw_seg or {}).get("text") or ""
+        clean_seg = cleaned_by_index[idx] if idx < len(cleaned_by_index) else {}
+        clean_seg_text = (clean_seg or {}).get("clean_text") or ""
+        filler_count, repetition_count = _count_cleaning_changes(raw_seg_text, clean_seg_text)
+        total_filler += filler_count
+        total_repetition += repetition_count
+        if (
+            len(examples) < max_examples
+            and raw_seg_text.strip()
+            and raw_seg_text.strip() != clean_seg_text.strip()
+            and (filler_count or repetition_count or len(raw_seg_text) - len(clean_seg_text) >= 4)
+        ):
+            examples.append({
+                "raw": raw_seg_text.strip()[:160],
+                "cleaned": clean_seg_text.strip()[:160],
+            })
+    ratio = round(1.0 - (cleaned_chars / raw_chars), 4) if raw_chars else 0.0
+    return {
+        "raw_char_count": raw_chars,
+        "cleaned_char_count": cleaned_chars,
+        "removed_filler_count": int(total_filler),
+        "removed_repetition_count": int(total_repetition),
+        "cleaning_ratio": ratio,
+        "segment_count": len(transcript_segments or []),
+        "cleaned_segment_count": len(cleaned_segments or []),
+        "filler_words_removed": bool(total_filler or total_repetition or ratio > 0.0),
+        "examples": examples,
+    }
 
 
 def _guess_topic_tags(text):
@@ -1213,9 +1284,17 @@ def repair_semantic_plan_for_render(plan, source_segments=None):
     plan = repair_plan_if_too_few_knowledge_points(plan)
     plan = repair_invalid_fragment_timestamps(plan, source_segments=source_segments)
     plan = repair_long_knowledge_points(plan)
+    # Merge < 15s knowledge_points BEFORE the subtitle repair so the merged
+    # voice_script can be regenerated from the combined fragments.
+    plan = merge_too_small_knowledge_points(plan, min_seconds=15)
     plan = repair_subtitle_lines_from_voice_script(plan)
+    plan = improve_knowledge_point_titles(plan)
     plan = repair_assembly_paths(plan)
     _repair_semantic_plan(plan)
+    # 用户可见层：限制 kp 数量并生成 video_topics（5–10 个短视频方案）。
+    llm_topics = plan.pop("llm_video_topics", None)
+    cap_global_knowledge_points(plan)
+    build_video_topics_from_plan(plan, llm_topics=llm_topics)
     return plan
 
 
@@ -1694,6 +1773,589 @@ def _renumber_global_kps(points):
     return out, id_map
 
 
+def _plan_total_duration_seconds(plan):
+    """Best-effort total video duration in seconds, used to scale the kp cap."""
+    if not isinstance(plan, dict):
+        return 0.0
+    units = plan.get("semantic_units") or []
+    starts = []
+    ends = []
+    for u in units:
+        try:
+            s = float(u.get("start") or 0)
+            e = float(u.get("end") or 0)
+        except Exception:
+            continue
+        if e > s:
+            starts.append(s)
+            ends.append(e)
+    if starts and ends:
+        span = max(ends) - min(starts)
+        if span > 0:
+            return span
+    total = 0.0
+    for kp in plan.get("knowledge_points") or []:
+        for frag in kp.get("fragments") or []:
+            try:
+                d = float(frag.get("end") or 0) - float(frag.get("start") or 0)
+            except Exception:
+                continue
+            if d > 0:
+                total += d
+    return total
+
+
+def _dynamic_user_visible_cap(total_duration_seconds):
+    """Pick a sensible per-video cap.
+
+    Targets:
+      <10 min      → 10 个上限（用户期望 6–10）
+      10–30 min    → 18 个上限（用户期望 10–18）
+      ≥30 min      → 25 个上限（用户期望 12–25）
+    """
+    try:
+        secs = float(total_duration_seconds or 0)
+    except Exception:
+        secs = 0.0
+    if secs <= 0:
+        return 20
+    if secs < 600:
+        return 10
+    if secs < 1800:
+        return 18
+    return 25
+
+
+_BAD_KP_TITLE_PATTERNS = (
+    re.compile(r"^片段\s*\d+$"),
+    re.compile(r"^段落\s*\d+$"),
+    re.compile(r"^知识点\s*\d+$"),
+    re.compile(r"^可选择知识点\s*\d+$"),
+    re.compile(r"^第[一二三四五六七八九十0-9０-９]+(段|段落|片段)\s*$"),
+    re.compile(r"^(提到|讲到|说到)了?\s*[\d０-９]*$"),
+    re.compile(r"^(内容)?总结\s*\d*$"),
+    re.compile(r"^(其它|其他|misc)\s*合集?\s*$", re.IGNORECASE),
+)
+
+
+def _is_bad_kp_title(title):
+    candidate = (title or "").strip()
+    if not candidate:
+        return True
+    if len(candidate) < 4:
+        return True
+    return any(pat.match(candidate) for pat in _BAD_KP_TITLE_PATTERNS)
+
+
+def _improve_kp_title(kp):
+    if not isinstance(kp, dict):
+        return kp
+    title = (kp.get("kp_title") or "").strip()
+    if not _is_bad_kp_title(title):
+        return kp
+    candidate_sources = [
+        kp.get("kp_summary"),
+        kp.get("voice_script"),
+        kp.get("selection_reason"),
+    ]
+    for raw in candidate_sources:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        first_sentence = re.split(r"[。！？\n]+", text, maxsplit=1)[0].strip()
+        first_sentence = re.sub(r"[，。！？、；,.!?;]+$", "", first_sentence)
+        if first_sentence and not _is_bad_kp_title(first_sentence):
+            kp["kp_title"] = first_sentence[:24]
+            kp["kp_title_repaired"] = True
+            return kp
+    # Last resort: prefix with kp_type to keep it minimally informative.
+    kp_type = kp.get("kp_type") or "concept"
+    kp["kp_title"] = f"{kp_type}：{(kp.get('voice_script') or kp.get('kp_summary') or kp.get('kp_id') or 'kp')[:18]}"
+    kp["kp_title_repaired"] = True
+    return kp
+
+
+def improve_knowledge_point_titles(plan):
+    if not isinstance(plan, dict):
+        return plan
+    for kp_item in plan.get("knowledge_points") or []:
+        _improve_kp_title(kp_item)
+    return plan
+
+
+def merge_too_small_knowledge_points(plan, min_seconds=15):
+    """Merge knowledge_points whose total fragment duration < min_seconds into
+    the closest neighbour (by start time). The merged-away kp_id is recorded
+    in discarded_duplicates with reason starting with ``merged_too_small_``.
+    """
+    if not isinstance(plan, dict):
+        return plan
+    points = plan.get("knowledge_points") or []
+    if len(points) <= 1:
+        return plan
+
+    def _kp_start(kp_item):
+        frags = kp_item.get("fragments") or []
+        starts = [float(f.get("start") or 0) for f in frags if f]
+        return min(starts) if starts else float("inf")
+
+    ordered = sorted(points, key=_kp_start)
+    out = list(ordered)
+    merged_into = {}
+
+    while True:
+        target_index = None
+        for i, kp_item in enumerate(out):
+            if kp_item is None:
+                continue
+            duration = calculate_kp_duration(kp_item)
+            if duration >= min_seconds:
+                continue
+            # Forward neighbour first; fall back to backward.
+            neighbour_idx = None
+            for j in range(i + 1, len(out)):
+                if out[j] is not None:
+                    neighbour_idx = j
+                    break
+            if neighbour_idx is None:
+                for j in range(i - 1, -1, -1):
+                    if out[j] is not None:
+                        neighbour_idx = j
+                        break
+            if neighbour_idx is None or neighbour_idx == i:
+                continue
+            target = out[neighbour_idx]
+            target_fragments = list(target.get("fragments") or []) + list(kp_item.get("fragments") or [])
+            try:
+                target_fragments.sort(key=lambda f: float(f.get("start") or 0))
+            except Exception:
+                pass
+            target["fragments"] = target_fragments
+            target["source_atom_ids"] = list(dict.fromkeys(
+                (target.get("source_atom_ids") or []) + (kp_item.get("source_atom_ids") or [])
+            ))
+            target["source_unit_ids"] = list(dict.fromkeys(
+                (target.get("source_unit_ids") or []) + (kp_item.get("source_unit_ids") or [])
+            ))
+            target_merged_from = target.get("merged_from") or [target.get("kp_id")]
+            extra_merged = kp_item.get("merged_from") or [kp_item.get("kp_id")]
+            target["merged_from"] = list(dict.fromkeys(target_merged_from + extra_merged))
+            target["source_chunk_ids"] = list(dict.fromkeys(
+                (target.get("source_chunk_ids") or []) + (kp_item.get("source_chunk_ids") or [])
+            ))
+            calculate_kp_duration(target)
+            merged_into[kp_item.get("kp_id")] = target.get("kp_id")
+            out[i] = None
+            target_index = i
+            break
+        if target_index is None:
+            break
+
+    if merged_into:
+        plan["knowledge_points"] = [kp_item for kp_item in out if kp_item is not None]
+        discarded = plan.get("discarded_duplicates") or []
+        existing_ids = set()
+        for item in discarded:
+            if isinstance(item, dict):
+                existing_ids.add(item.get("local_kp_id") or item.get("kp_id"))
+            elif isinstance(item, str):
+                existing_ids.add(item)
+        for src_id, tgt_id in merged_into.items():
+            if not src_id or src_id in existing_ids:
+                continue
+            discarded.append({
+                "local_kp_id": src_id,
+                "reason": f"merged_too_small_into_{tgt_id}",
+            })
+        plan["discarded_duplicates"] = discarded
+        plan["merged_too_small_count"] = len(merged_into)
+    else:
+        plan.setdefault("merged_too_small_count", 0)
+    return plan
+
+
+def _kp_priority_score(kp):
+    """综合分用于截断排序：importance × (0.5 + clip_value)。"""
+    if not isinstance(kp, dict):
+        return 0.0
+    scores = kp.get("scores") or {}
+    try:
+        importance = float(scores.get("importance") or 3)
+    except Exception:
+        importance = 3.0
+    try:
+        clip_value = float(scores.get("clip_value") or 0.5)
+    except Exception:
+        clip_value = 0.5
+    if clip_value > 1:
+        clip_value = clip_value / 100.0
+    return importance * (0.5 + max(0.0, min(1.0, clip_value)))
+
+
+def cap_global_knowledge_points(plan, max_user_visible=None, min_duration_seconds=15):
+    """限制用户可见的 knowledge_points 数量。
+
+    ``max_user_visible=None`` 时按视频总时长动态决定（10 / 18 / 25 三档），
+    否则使用调用者指定值。knowledge_points 本身全部保留，只新增：
+      - 每个 kp 的 visibility 字段 ("user" / "advanced")
+      - 顶层 user_visible_kp_ids / advanced_kp_ids 列表
+      - 顶层 kp_cap_summary 用于调试
+    超过 max_user_visible、时长低于 min_duration_seconds、或综合分不在 top N 的
+    都会被标为 advanced，并追加到 discarded_duplicates 里以便 audit 复查。
+    """
+    if not isinstance(plan, dict):
+        return plan
+    total_duration = _plan_total_duration_seconds(plan)
+    if max_user_visible is None:
+        max_user_visible = _dynamic_user_visible_cap(total_duration)
+    points = plan.get("knowledge_points") or []
+    if not points:
+        plan["user_visible_kp_ids"] = []
+        plan["advanced_kp_ids"] = []
+        plan["kp_cap_summary"] = {
+            "max_user_visible": max_user_visible,
+            "min_duration_seconds": min_duration_seconds,
+            "total_video_duration_seconds": round(total_duration, 2),
+            "total_count": 0,
+            "user_visible_count": 0,
+            "advanced_count": 0,
+            "short_count": 0,
+        }
+        return plan
+
+    scored = []
+    for kp in points:
+        try:
+            duration = calculate_kp_duration(kp)
+        except Exception:
+            duration = 0.0
+        scored.append((kp, duration, _kp_priority_score(kp)))
+
+    # 综合分降序遍历，给前 max_user_visible 个标 visibility="user"。
+    scored_sorted = sorted(scored, key=lambda x: x[2], reverse=True)
+    user_visible_ids = []
+    advanced_ids = []
+    short_ids = []
+    for kp, duration, _score in scored_sorted:
+        kp_id = kp.get("kp_id")
+        if not kp_id:
+            continue
+        if duration < min_duration_seconds:
+            kp["visibility"] = "advanced"
+            kp["advanced_reason"] = f"duration_lt_{int(min_duration_seconds)}s"
+            advanced_ids.append(kp_id)
+            short_ids.append(kp_id)
+            continue
+        if len(user_visible_ids) < max_user_visible:
+            kp["visibility"] = "user"
+            kp.pop("advanced_reason", None)
+            user_visible_ids.append(kp_id)
+        else:
+            kp["visibility"] = "advanced"
+            kp["advanced_reason"] = "not_top_importance"
+            advanced_ids.append(kp_id)
+
+    existing_discarded = plan.get("discarded_duplicates") or []
+    seen_ids = set()
+    for item in existing_discarded:
+        if isinstance(item, dict):
+            kid = item.get("local_kp_id") or item.get("kp_id")
+            if kid:
+                seen_ids.add(kid)
+        elif isinstance(item, str):
+            seen_ids.add(item)
+    for kp_id in advanced_ids:
+        if kp_id in seen_ids:
+            continue
+        kp = next((p for p in points if p.get("kp_id") == kp_id), None)
+        reason = (kp or {}).get("advanced_reason") or "advanced_only"
+        existing_discarded.append({"local_kp_id": kp_id, "reason": reason})
+    plan["discarded_duplicates"] = existing_discarded
+
+    plan["user_visible_kp_ids"] = user_visible_ids
+    plan["advanced_kp_ids"] = advanced_ids
+    plan["kp_cap_summary"] = {
+        "max_user_visible": max_user_visible,
+        "min_duration_seconds": min_duration_seconds,
+        "total_video_duration_seconds": round(total_duration, 2),
+        "total_count": len(points),
+        "user_visible_count": len(user_visible_ids),
+        "advanced_count": len(advanced_ids),
+        "short_count": len(short_ids),
+    }
+    return plan
+
+
+_DIFFICULTY_ALIASES = {
+    "easy": "easy",
+    "简单": "easy",
+    "入门": "easy",
+    "新手": "easy",
+    "medium": "medium",
+    "中级": "medium",
+    "一般": "medium",
+    "中等": "medium",
+    "advanced": "advanced",
+    "高级": "advanced",
+    "进阶": "advanced",
+    "专家": "advanced",
+}
+
+
+def _normalize_difficulty(value, kp_types=None):
+    text = str(value or "").strip().lower()
+    if text in _DIFFICULTY_ALIASES:
+        return _DIFFICULTY_ALIASES[text]
+    # Heuristic: if recommended kp types contain implementation/workflow, lean medium.
+    if kp_types:
+        if any(t in {"implementation", "workflow", "principle"} for t in kp_types):
+            return "medium"
+        if any(t in {"operation", "tool_usage", "case"} for t in kp_types):
+            return "easy"
+    return "medium"
+
+
+_VIDEO_TYPE_ALIASES = {
+    "boss": "boss_report",
+    "boss_report": "boss_report",
+    "tutorial": "tutorial",
+    "教程": "tutorial",
+    "operation": "operation_demo",
+    "operation_demo": "operation_demo",
+    "demo": "operation_demo",
+    "演示": "operation_demo",
+    "short_video": "short_video",
+    "short": "short_video",
+    "product_intro": "product_intro",
+    "product": "product_intro",
+}
+_VIDEO_TYPES = {"boss_report", "tutorial", "operation_demo", "short_video", "product_intro"}
+
+
+def _normalize_video_type(value):
+    text = str(value or "").strip().lower()
+    if text in _VIDEO_TYPES:
+        return text
+    return _VIDEO_TYPE_ALIASES.get(text, "short_video")
+
+
+def _coerce_video_topic(raw, kps_by_id, visible_ids,
+                       kp_per_topic_min=3, kp_per_topic_max=6, idx=0):
+    """把 LLM 或 big_hook 的原始 dict 归一化为 video_topic。
+
+    返回 None 表示该 topic 在约束下无法成立（推荐 kp 数量不足等）。
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    def _pick_ids(field_names):
+        picked = []
+        for name in field_names:
+            for kid in raw.get(name) or []:
+                if isinstance(kid, str) and kid in kps_by_id and kid in visible_ids and kid not in picked:
+                    picked.append(kid)
+        return picked
+
+    recommended = _pick_ids(["recommended_kp_ids", "ordered_kp_ids", "kp_ids"])
+    if len(recommended) > kp_per_topic_max:
+        recommended = sorted(
+            recommended,
+            key=lambda x: _kp_priority_score(kps_by_id.get(x, {})),
+            reverse=True,
+        )[:kp_per_topic_max]
+    if len(recommended) < kp_per_topic_min:
+        for kid in raw.get("optional_kp_ids") or []:
+            if isinstance(kid, str) and kid in kps_by_id and kid in visible_ids and kid not in recommended:
+                recommended.append(kid)
+                if len(recommended) >= kp_per_topic_min:
+                    break
+    if len(recommended) < kp_per_topic_min:
+        return None
+
+    optional = []
+    for kid in raw.get("optional_kp_ids") or []:
+        if isinstance(kid, str) and kid in kps_by_id and kid in visible_ids and kid not in recommended and kid not in optional:
+            optional.append(kid)
+        if len(optional) >= 2:
+            break
+
+    try:
+        estimated_duration = int(raw.get("estimated_duration") or 0)
+    except Exception:
+        estimated_duration = 0
+    if not estimated_duration:
+        estimated_duration = int(sum(calculate_kp_duration(kps_by_id.get(k, {})) for k in recommended))
+
+    target_audience = (raw.get("target_audience") or raw.get("audience_fit") or "").strip()
+    kp_types_for_topic = [(kps_by_id.get(k) or {}).get("kp_type") for k in recommended]
+    difficulty = _normalize_difficulty(raw.get("difficulty"), kp_types=kp_types_for_topic)
+    opening_script = (raw.get("opening_script") or raw.get("opening_sentence") or raw.get("opening_hook") or "").strip()
+    closing_script = (raw.get("closing_script") or raw.get("closing_sentence") or "").strip()
+
+    return {
+        "topic_id": raw.get("topic_id") or f"topic_{idx + 1:03d}",
+        "topic_title": (raw.get("topic_title") or raw.get("hook_title") or f"短视频方案 {idx + 1}").strip(),
+        "topic_hook": (raw.get("topic_hook") or raw.get("opening_hook") or "").strip(),
+        "topic_summary": (raw.get("topic_summary") or raw.get("hook_summary") or raw.get("path_goal") or "").strip(),
+        "video_type": _normalize_video_type(raw.get("video_type") or raw.get("hook_type") or raw.get("recommended_for")),
+        "recommended_kp_ids": recommended,
+        "optional_kp_ids": optional,
+        "estimated_duration": estimated_duration,
+        "difficulty": difficulty,
+        "target_audience": target_audience,
+        "audience_fit": target_audience,
+        "opening_script": opening_script,
+        "closing_script": closing_script,
+        "why_recommended": (raw.get("why_recommended") or raw.get("why_it_works") or "").strip(),
+        "source_hook_id": raw.get("source_hook_id") or raw.get("hook_id"),
+        "is_auto_supplemented": False,
+    }
+
+
+def _auto_supplement_video_topics(existing, plan, target_min=5,
+                                   kp_per_topic_min=3, kp_per_topic_max=6):
+    """existing 不足 target_min 时，按 importance 降序分桶补齐 topic。"""
+    kps_by_id = {kp.get("kp_id"): kp for kp in (plan.get("knowledge_points") or []) if kp.get("kp_id")}
+    visible_ids = list(plan.get("user_visible_kp_ids") or list(kps_by_id.keys()))
+    if not visible_ids:
+        return existing
+    # 按综合分降序，覆盖更高优先级的 kp。
+    visible_ids_sorted = sorted(visible_ids, key=lambda x: _kp_priority_score(kps_by_id.get(x, {})), reverse=True)
+    used_kp_ids = set()
+    for topic in existing:
+        used_kp_ids.update(topic.get("recommended_kp_ids") or [])
+    pool = [kid for kid in visible_ids_sorted if kid not in used_kp_ids]
+
+    topic_index = len(existing) + 1
+    while len(existing) < target_min and (pool or visible_ids_sorted):
+        bucket = pool[:kp_per_topic_max]
+        if len(bucket) < kp_per_topic_min:
+            for kid in visible_ids_sorted:
+                if len(bucket) >= kp_per_topic_min:
+                    break
+                if kid not in bucket:
+                    bucket.append(kid)
+        if len(bucket) < kp_per_topic_min:
+            break
+        first_kp = kps_by_id.get(bucket[0]) or {}
+        kp_type = first_kp.get("kp_type") or "concept"
+        if kp_type in {"operation", "implementation", "workflow", "tool_usage"}:
+            video_type = "operation_demo"
+        elif kp_type in {"problem", "business_value", "decision", "summary"}:
+            video_type = "boss_report"
+        elif kp_type in {"principle", "concept", "comparison"}:
+            video_type = "tutorial"
+        else:
+            video_type = "short_video"
+        bucket_types = [(kps_by_id.get(k) or {}).get("kp_type") for k in bucket[:kp_per_topic_max]]
+        topic = {
+            "topic_id": f"topic_{topic_index:03d}",
+            "topic_title": (first_kp.get("kp_title") or f"补充方案 {topic_index}")[:36],
+            "topic_hook": (first_kp.get("selection_reason") or "").strip(),
+            "topic_summary": (first_kp.get("kp_summary") or "").strip(),
+            "video_type": video_type,
+            "recommended_kp_ids": bucket[:kp_per_topic_max],
+            "optional_kp_ids": [],
+            "estimated_duration": int(sum(calculate_kp_duration(kps_by_id.get(k, {})) for k in bucket[:kp_per_topic_max])),
+            "difficulty": _normalize_difficulty(None, kp_types=bucket_types),
+            "target_audience": "",
+            "audience_fit": "",
+            "opening_script": "",
+            "closing_script": "",
+            "why_recommended": "由系统按知识点重要度自动补齐的短视频方案。",
+            "source_hook_id": None,
+            "is_auto_supplemented": True,
+        }
+        existing.append(topic)
+        topic_index += 1
+        used_kp_ids.update(bucket)
+        pool = [kid for kid in pool if kid not in bucket]
+        if not pool:
+            # 已用完候选，跳出避免无限循环
+            break
+    return existing
+
+
+def build_video_topics_from_plan(plan, llm_topics=None, target_min=5, target_max=10,
+                                  kp_per_topic_min=3, kp_per_topic_max=6):
+    """生成 user-facing 的 video_topics。
+
+    优先级：
+      1. LLM 返回的 video_topics（参数 llm_topics）
+      2. plan.big_hooks 转换
+      3. assembly_paths 转换（作为补充）
+      4. 自动补齐
+    总数硬截到 [target_min, target_max]，重复 kp 集合的 topic 会去重。
+    """
+    if not isinstance(plan, dict):
+        return plan
+    points = plan.get("knowledge_points") or []
+    if not points:
+        plan["video_topics"] = []
+        plan["video_topics_count"] = 0
+        plan["video_topics_targets"] = {
+            "min": target_min,
+            "max": target_max,
+            "kp_per_topic_min": kp_per_topic_min,
+            "kp_per_topic_max": kp_per_topic_max,
+        }
+        return plan
+    kps_by_id = {kp.get("kp_id"): kp for kp in points if kp.get("kp_id")}
+    visible_ids = set(plan.get("user_visible_kp_ids") or list(kps_by_id.keys()))
+
+    topics = []
+    seen_signatures = set()
+
+    def _add_topic(candidate):
+        if not candidate:
+            return
+        signature = tuple(sorted(candidate.get("recommended_kp_ids") or []))
+        if not signature or signature in seen_signatures:
+            return
+        candidate["topic_id"] = f"topic_{len(topics) + 1:03d}"
+        topics.append(candidate)
+        seen_signatures.add(signature)
+
+    for idx, raw in enumerate(llm_topics or []):
+        if len(topics) >= target_max:
+            break
+        _add_topic(_coerce_video_topic(raw, kps_by_id, visible_ids, kp_per_topic_min, kp_per_topic_max, idx))
+
+    if len(topics) < target_max:
+        for idx, hook in enumerate(plan.get("big_hooks") or []):
+            if len(topics) >= target_max:
+                break
+            _add_topic(_coerce_video_topic(hook, kps_by_id, visible_ids, kp_per_topic_min, kp_per_topic_max, idx))
+
+    if len(topics) < target_max:
+        for idx, path in enumerate(plan.get("assembly_paths") or []):
+            if len(topics) >= target_max:
+                break
+            _add_topic(_coerce_video_topic(path, kps_by_id, visible_ids, kp_per_topic_min, kp_per_topic_max, idx))
+
+    if len(topics) < target_min:
+        topics = _auto_supplement_video_topics(
+            topics, plan,
+            target_min=target_min,
+            kp_per_topic_min=kp_per_topic_min,
+            kp_per_topic_max=kp_per_topic_max,
+        )
+
+    topics = topics[:target_max]
+    for idx, topic in enumerate(topics):
+        topic["topic_id"] = f"topic_{idx + 1:03d}"
+
+    plan["video_topics"] = topics
+    plan["video_topics_count"] = len(topics)
+    plan["video_topics_targets"] = {
+        "min": target_min,
+        "max": target_max,
+        "kp_per_topic_min": kp_per_topic_min,
+        "kp_per_topic_max": kp_per_topic_max,
+    }
+    return plan
+
+
 def _deterministic_merge_chunk_plans(chunk_plans, project_id=""):
     units = _all_local_items(chunk_plans, "local_semantic_units")
     atoms = _all_local_items(chunk_plans, "local_knowledge_atoms")
@@ -2035,10 +2697,14 @@ def plan_knowledge_modules_chunked(cleaned_segments, full_text, voice_style, pro
         if isinstance(hook_call.get("result"), dict):
             hooks = hook_call["result"].get("big_hooks") or []
             paths = hook_call["result"].get("assembly_paths") or []
+            llm_topics = hook_call["result"].get("video_topics") or []
             if hooks and paths:
                 global_plan["big_hooks"] = hooks
                 global_plan["assembly_paths"] = paths
                 hook_plan_status = "success"
+            if llm_topics:
+                # 留给 repair_semantic_plan_for_render 转换为最终 video_topics。
+                global_plan["llm_video_topics"] = llm_topics
     if not global_plan.get("big_hooks") or not global_plan.get("assembly_paths"):
         _build_default_hooks_for_points(global_plan)
 
@@ -2378,6 +3044,134 @@ def build_selected_render_plan(selected_module_ids, selected_fragment_ids,
             }
         ]
     }
+
+
+def build_render_jobs_from_topics(plan, voice_style="讲解风格", project_id=None):
+    """Convert plan.video_topics into a self-contained render_jobs payload.
+
+    Each video_topic becomes a render_job whose render_units are ready to be
+    handed straight to `generate_videos_from_plan`. The payload is meant to be
+    persisted as render_jobs.json next to clips.json / knowledge_modules.json
+    so that future render sessions can reuse the same plan (no re-STT, no
+    re-LLM) and just pick a subset of jobs.
+    """
+    created_from_plan_id = project_id or (plan.get("project_id") if isinstance(plan, dict) else None)
+    payload = {
+        "voice_style": voice_style,
+        "created_from_plan_id": created_from_plan_id,
+        "plan_reusable": False,
+        "render_jobs": [],
+        "render_jobs_count": 0,
+        "render_output_mode": "single_complete_video",
+    }
+    if not isinstance(plan, dict):
+        return payload
+    topics = plan.get("video_topics") or []
+    if not topics:
+        return payload
+
+    jobs = []
+    for idx, topic in enumerate(topics):
+        kp_ids = [kid for kid in (topic.get("recommended_kp_ids") or []) if kid]
+        if not kp_ids:
+            continue
+        title = topic.get("topic_title") or f"短视频方案 {idx + 1}"
+        try:
+            unit_payload = build_selected_render_plan(
+                selected_module_ids=kp_ids,
+                selected_fragment_ids=[],
+                knowledge_modules=plan,
+                fragment_order="user_order",
+                voice_style=voice_style,
+                title=title,
+            )
+        except Exception as e:
+            unit_payload = {"render_units": [], "selected_kp_ids": kp_ids, "error": str(e)}
+        render_units = unit_payload.get("render_units") or []
+        if not render_units:
+            continue
+        ordered_kp_ids = unit_payload.get("selected_kp_ids") or [u.get("kp_id") for u in render_units if u.get("kp_id")]
+        topic_id = topic.get("topic_id") or f"topic_{idx + 1:03d}"
+        safe_topic = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(topic_id)) or f"topic_{idx + 1:03d}"
+        job = {
+            "job_id": f"job_{idx + 1:03d}",
+            "topic_id": topic_id,
+            "topic_title": title,
+            "topic_hook": topic.get("topic_hook") or "",
+            "topic_summary": topic.get("topic_summary") or "",
+            "video_type": topic.get("video_type") or "short_video",
+            "difficulty": topic.get("difficulty") or "medium",
+            "target_audience": topic.get("target_audience") or topic.get("audience_fit") or "",
+            "audience_fit": topic.get("audience_fit") or topic.get("target_audience") or "",
+            "opening_script": topic.get("opening_script") or "",
+            "closing_script": topic.get("closing_script") or "",
+            "why_recommended": topic.get("why_recommended") or "",
+            "estimated_duration": topic.get("estimated_duration"),
+            "selected_kp_ids": ordered_kp_ids,
+            "selected_hook_id": topic.get("source_hook_id"),
+            "render_units": render_units,
+            "fragment_order": "user_order",
+            "voice_style": voice_style,
+            "render_output_mode": "single_complete_video",
+            "final_video_title": title,
+            "final_video_opening_hook": topic.get("topic_hook") or "",
+            "final_video_structure": "按所选知识点顺序讲解",
+            "is_auto_supplemented": bool(topic.get("is_auto_supplemented")),
+            "expected_output_path": f"final_videos/{safe_topic}_complete_video.mp4",
+        }
+        jobs.append(job)
+
+    payload["render_jobs"] = jobs
+    payload["render_jobs_count"] = len(jobs)
+    payload["plan_reusable"] = bool(jobs)
+    return payload
+
+
+def validate_selected_render_jobs(payload):
+    """Validate a selected_render_jobs payload before rendering.
+
+    Returns (ok, reasons, metrics). Reasons are human-readable strings.
+    """
+    metrics = {
+        "selected_topic_ids_count": 0,
+        "render_jobs_count": 0,
+        "missing_field_count": 0,
+        "missing_render_unit_count": 0,
+    }
+    reasons = []
+    if not isinstance(payload, dict):
+        return False, ["selected_render_jobs 必须是 JSON 对象"], metrics
+    topic_ids = payload.get("selected_topic_ids") or []
+    jobs = payload.get("render_jobs") or []
+    metrics["selected_topic_ids_count"] = len(topic_ids)
+    metrics["render_jobs_count"] = len(jobs)
+    if not topic_ids:
+        reasons.append("selected_topic_ids 为空")
+    if not jobs:
+        reasons.append("render_jobs 为空")
+        return False, reasons, metrics
+    required_job_fields = ("job_id", "topic_id", "selected_kp_ids", "render_units")
+    required_unit_fields = ("voice_script", "subtitle_lines", "source_fragments")
+    for idx, job in enumerate(jobs):
+        if not isinstance(job, dict):
+            reasons.append(f"render_jobs[{idx}] 不是对象")
+            metrics["missing_field_count"] += 1
+            continue
+        for field in required_job_fields:
+            value = job.get(field)
+            if not value:
+                reasons.append(f"render_jobs[{idx}] 缺少字段 {field}")
+                metrics["missing_field_count"] += 1
+        for u_idx, unit in enumerate(job.get("render_units") or []):
+            if not isinstance(unit, dict):
+                reasons.append(f"render_jobs[{idx}].render_units[{u_idx}] 不是对象")
+                metrics["missing_render_unit_count"] += 1
+                continue
+            for field in required_unit_fields:
+                if not unit.get(field):
+                    reasons.append(f"render_jobs[{idx}].render_units[{u_idx}] 缺少 {field}")
+                    metrics["missing_render_unit_count"] += 1
+    return not reasons, reasons, metrics
 
 
 def validate_knowledge_modules(modules, leak_check_fn=None):

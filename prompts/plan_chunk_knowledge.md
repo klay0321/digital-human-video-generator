@@ -7,11 +7,15 @@
 
 重要要求：
 - 只基于当前 chunk 的真实内容，不要补充原文没有的信息。
-- 每个 local_candidate_knowledge_point 应控制在 20 到 60 秒，最多不超过 90 秒。
-- 不要把完整长流程塞进一个知识点；长流程拆成前置配置、操作步骤、结果验证、常见问题、总结价值。
+- 每个 local_candidate_knowledge_point 应控制在 30 到 60 秒，最多不超过 90 秒。
+- 时长不足 15 秒的内容不允许作为独立 knowledge_point，必须与相邻内容合并或写入 local_discarded_content（discard_type=low_value）。
+- **每个 chunk 至多输出 6 个 local_candidate_knowledge_points**；超过时按 scores.importance × (0.5 + clip_value) 降序保留前 6 个，其余写入 local_discarded_content（discard_type=low_value 或 repetition）。
+- 不要把完整长流程塞进一个知识点；长流程拆成前置配置、操作步骤、结果验证、常见问题、总结价值，但每个子项仍然要满足 ≥15 秒。
 - fragments 可以有多个，但 duration 按 fragments 总时长计算，不按最早 start 到最晚 end 的跨度计算。
-- voice_script 必须基于 chunk 原文清洗整理，适合 TTS 朗读，去掉“嗯、啊、就是、然后这个、那个”等口头禅。
-- subtitle_lines 必须来自 voice_script，每行不超过 18 到 22 个中文字符。
+- voice_script 必须基于 chunk 原文清洗整理，适合 TTS 朗读。必须去掉：嗯、啊、额、呃、这个、那个、然后呢、就是说、对吧、你知道、其实就是、然后然后、好的好的、明白吧、差不多、这种东西、啥的；但保留事实和技术词。
+- voice_script 不允许出现 source_text / raw_text 的原样段落，必须重写。
+- subtitle_lines 必须来自 voice_script，每行不超过 18 到 22 个中文字符；不要直接复制 raw_text。
+- 标题必须是知识点（用户能理解“这条视频会讲什么”），不允许 "片段 1"、"段落 2"、"提到了 XX"、"内容总结" 这类目录式标题。
 - 如果当前 chunk 主要是重复、卡顿、跑题、等待、无意义口水话，应标入 local_discarded_content。
 
 输出 schema：

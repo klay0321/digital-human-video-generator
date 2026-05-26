@@ -13,6 +13,7 @@ load_dotenv(PROJECT_ROOT / ".env", override=True)
 from pipeline import (
     generate_clips_plan,
     generate_videos_from_plan,
+    generate_videos_from_render_jobs,
     save_all_clips_changes,
     save_selected_render_plan,
 )
@@ -53,8 +54,11 @@ for key, default in [
         st.session_state[key] = default
 
 # ══════════════════════════════════════════════════════════════
-# 1. 文字来源
+# 第 1 步 · 输入素材（文字来源）
 # ══════════════════════════════════════════════════════════════
+st.markdown("## 1️⃣ 输入素材")
+st.caption("先选定转写文字来源；下面再上传视频、头像和（可选）声音样本。")
+
 input_mode_label = st.radio("选择文字来源", [
     "自动从视频提取音频并转文字",
     "手动粘贴转写文字",
@@ -62,8 +66,9 @@ input_mode_label = st.radio("选择文字来源", [
 ])
 
 # ══════════════════════════════════════════════════════════════
-# 2. 切片策略  (new in this round)
+# 第 2 步 · 切片策略（决定内容计划怎么生成）
 # ══════════════════════════════════════════════════════════════
+st.markdown("## 2️⃣ 切片策略")
 clip_plan_mode = st.radio(
     "切片策略",
     ["知识点模块切片", "时间线连续切片"],
@@ -76,54 +81,62 @@ clip_plan_mode = st.radio(
 )
 
 # ══════════════════════════════════════════════════════════════
-# 3. 声音模式
+# 第 4 步 · 声音 / 克隆音色 / 数字人形象（默认折叠，按需展开调）
 # ══════════════════════════════════════════════════════════════
-audio_mode_label = st.radio("声音模式", [
-    "保留原视频原声",
-    "使用已有 ElevenLabs voice_id 替换原声",
-    "上传声音样本，通过 ElevenLabs API 云端克隆后替换原声",
-    "从原视频原声自动提取样本并克隆后替换原声",
-])
-
+# Variable defaults (in case the user never expands the section).
 voice_sample_paths: list[str] = []
 voice_name = "demo_voice_clone"
 voice_sample_files = None
 remove_background_noise = False
 voice_consent = False
 source_audio_clone_target_seconds = 90
+audio_mode_label = "保留原视频原声"
+force_regenerate_seedance_avatar = False
+seedance_quality_mode = "fast"
+digital_human_window_style = "card"
+digital_human_video_mode = "preview_loop"
+fallback_experimental_i2v_to_fast = False
 
-if audio_mode_label.startswith("上传声音样本"):
-    st.info(
-        "请仅上传你本人或已获得授权的声音样本。"
-        "未经授权克隆他人声音可能涉及侵权。本 Demo 仅用于授权范围内的内部测试。"
-    )
-    voice_name = st.text_input("克隆音色名称", value="demo_voice_clone")
-    voice_sample_files = st.file_uploader(
-        "上传声音样本（mp3/wav/m4a/aac/ogg），建议清晰单人声音，30秒~3分钟",
-        type=["mp3", "wav", "m4a", "aac", "ogg"],
-        accept_multiple_files=True,
-    )
-    remove_background_noise = st.checkbox("创建克隆音色时尝试去除背景噪音", value=False)
-    voice_consent = st.checkbox(
-        "我确认已获得该声音所有者授权，并同意仅用于本次 Demo 视频生成",
-        value=False,
-    )
-elif audio_mode_label.startswith("从原视频原声"):
-    st.info(
-        "系统会从原视频中自动抽取清晰单人讲解声音片段，用于创建 ElevenLabs 克隆音色。"
-        "生成视频时，克隆音将朗读清洗后的 voice_script，而不是原始口头转写。"
-    )
-    voice_name = st.text_input("克隆音色名称", value="source_video_voice_clone")
-    source_audio_clone_target_seconds = st.slider("样本目标总时长（秒）", 45, 180, 90, 5)
-    remove_background_noise = st.checkbox("创建克隆音色时尝试去除背景噪音", value=True)
-    voice_consent = st.checkbox(
-        "我确认该视频声音来自本人或已获得授权，并同意用于本次 Demo 的声音克隆。",
-        value=False,
-    )
+st.markdown("## 4️⃣ 声音 · 数字人 · 字幕")
+st.caption("可在生成视频前再调；默认折叠不打扰主流程。")
 
-# ══════════════════════════════════════════════════════════════
-# 4. 克隆声音讲述风格  (new in this round)
-# ══════════════════════════════════════════════════════════════
+with st.expander("🎙️ 声音模式（保留原声 / 替换 / 克隆）", expanded=False):
+    audio_mode_label = st.radio("声音模式", [
+        "保留原视频原声",
+        "使用已有 ElevenLabs voice_id 替换原声",
+        "上传声音样本，通过 ElevenLabs API 云端克隆后替换原声",
+        "从原视频原声自动提取样本并克隆后替换原声",
+    ])
+
+    if audio_mode_label.startswith("上传声音样本"):
+        st.info(
+            "请仅上传你本人或已获得授权的声音样本。"
+            "未经授权克隆他人声音可能涉及侵权。本 Demo 仅用于授权范围内的内部测试。"
+        )
+        voice_name = st.text_input("克隆音色名称", value="demo_voice_clone")
+        voice_sample_files = st.file_uploader(
+            "上传声音样本（mp3/wav/m4a/aac/ogg），建议清晰单人声音，30秒~3分钟",
+            type=["mp3", "wav", "m4a", "aac", "ogg"],
+            accept_multiple_files=True,
+        )
+        remove_background_noise = st.checkbox("创建克隆音色时尝试去除背景噪音", value=False)
+        voice_consent = st.checkbox(
+            "我确认已获得该声音所有者授权，并同意仅用于本次 Demo 视频生成",
+            value=False,
+        )
+    elif audio_mode_label.startswith("从原视频原声"):
+        st.info(
+            "系统会从原视频中自动抽取清晰单人讲解声音片段，用于创建 ElevenLabs 克隆音色。"
+            "生成视频时，克隆音将朗读清洗后的 voice_script，而不是原始口头转写。"
+        )
+        voice_name = st.text_input("克隆音色名称", value="source_video_voice_clone")
+        source_audio_clone_target_seconds = st.slider("样本目标总时长（秒）", 45, 180, 90, 5)
+        remove_background_noise = st.checkbox("创建克隆音色时尝试去除背景噪音", value=True)
+        voice_consent = st.checkbox(
+            "我确认该视频声音来自本人或已获得授权，并同意用于本次 Demo 的声音克隆。",
+            value=False,
+        )
+
 voice_style = st.selectbox(
     "克隆声音讲述风格",
     list_voice_styles(),
@@ -156,91 +169,87 @@ digital_human_mode_options = {
         "description": "当前真人头像可能触发隐私风控，需要官方授权素材或平台允许的人像素材。",
     },
 }
-selected_digital_human_label = st.selectbox(
-    "数字人形象模式",
-    list(digital_human_mode_options.keys()),
-    index=0,
-)
-selected_digital_human_mode = digital_human_mode_options[selected_digital_human_label]
-digital_human_provider = selected_digital_human_mode["key"]
-force_regenerate_seedance_avatar = False
-seedance_quality_mode = "fast"
-digital_human_window_style = "card"
-digital_human_video_mode = "preview_loop"
-fallback_experimental_i2v_to_fast = False
-
-digital_human_style_options = {
-    "直接叠加": "direct",
-    "卡片小窗（默认）": "card",
-}
-digital_human_video_mode_options = {
-    "预览短循环": "preview_loop",
-    "正式完整时长": "full_length",
-}
-
-st.caption(f"当前数字人模式 key: `{digital_human_provider}`")
-st.info(selected_digital_human_mode["description"])
-st.caption(
-    "模式说明：fast 保留头像；Seedance 2.0 质量更高但走 text_to_video，不保证本人头像；"
-    "Seedance 2.0 真人头像 i2v 是实验模式，可能触发隐私风控；当前不是精准 lip-sync。"
-)
-
-if digital_human_provider == DIGITAL_HUMAN_MODE_SEEDANCE_DYNAMIC:
-    st.info(
-        "Seedance fast 保留头像模式会走 image_to_video，尽量保留上传头像身份，"
-        "叠加现有 TTS 音频；当前不是精准 lip-sync。"
-    )
-    digital_human_style_label = st.selectbox(
-        "数字人样式",
-        list(digital_human_style_options.keys()),
-        index=1,
-        help="卡片小窗会增加半透明容器、细边框和阴影，减少贴图感。",
-    )
-    digital_human_window_style = digital_human_style_options[digital_human_style_label]
-    digital_human_video_mode_label = st.selectbox(
-        "数字人视频模式",
-        list(digital_human_video_mode_options.keys()),
+with st.expander("🤖 数字人形象（静态头像 / Seedance 动态）", expanded=False):
+    selected_digital_human_label = st.selectbox(
+        "数字人形象模式",
+        list(digital_human_mode_options.keys()),
         index=0,
-        help="正式完整时长会尽量生成接近视频长度的数字人视频，避免 5 秒短循环的重复感。",
     )
-    digital_human_video_mode = digital_human_video_mode_options[digital_human_video_mode_label]
+    selected_digital_human_mode = digital_human_mode_options[selected_digital_human_label]
+    digital_human_provider = selected_digital_human_mode["key"]
+
+    digital_human_style_options = {
+        "直接叠加": "direct",
+        "卡片小窗（默认）": "card",
+    }
+    digital_human_video_mode_options = {
+        "预览短循环": "preview_loop",
+        "正式完整时长": "full_length",
+    }
+
+    st.caption(f"当前数字人模式 key: `{digital_human_provider}`")
+    st.info(selected_digital_human_mode["description"])
     st.caption(
-        "当前 fast 保留头像；卡片小窗样式可减少贴图感。"
-        "正式完整时长会尽量生成接近视频长度的数字人视频。当前不是精准 lip-sync。"
+        "模式说明：fast 保留头像；Seedance 2.0 质量更高但走 text_to_video，不保证本人头像；"
+        "Seedance 2.0 真人头像 i2v 是实验模式，可能触发隐私风控；当前不是精准 lip-sync。"
     )
-    force_regenerate_seedance_avatar = st.checkbox(
-        "强制重新生成 Seedance 动态人像",
-        value=False,
-    )
-    if st.button("清理 Seedance 动态人像缓存"):
-        cache_dir = Path("outputs") / "seedance_cache"
-        if cache_dir.exists():
-            shutil.rmtree(cache_dir)
-        st.success("已清理 Seedance 动态人像缓存")
-elif digital_human_provider in {
-    DIGITAL_HUMAN_MODE_SEEDANCE_T2V_VIRTUAL_2_0,
-    DIGITAL_HUMAN_MODE_SEEDANCE_T2V_VIRTUAL_2_0_FAST,
-}:
-    st.info(
-        "Seedance 2.0 虚拟讲解人像会走 text_to_video 生成虚拟中文讲解人，"
-        "不使用上传头像，也不保证本人头像身份；当前不是精准 lip-sync。"
-    )
-elif digital_human_provider == DIGITAL_HUMAN_MODE_SEEDANCE_I2V_AVATAR_2_0_EXPERIMENTAL:
-    st.warning(
-        "Seedance 2.0 image_to_video 会尝试使用上传头像生成保留真人头像的小窗视频。"
-        "当前真人头像可能触发隐私风控，需要官方授权素材或平台允许的人像素材；失败时不会静默回退。"
-    )
-    fallback_experimental_i2v_to_fast = st.checkbox(
-        "实验失败后自动回退到 Seedance fast 保留头像模式",
-        value=False,
-    )
-    _legacy_experimental_notice = (
-        "Seedance 2.0 真人头像 image_to_video 目前是实验模式，真人头像可能触发隐私风控；"
-        "本轮不会接入或调用该实验链路，生成时会沿用当前静态头像兜底。"
-    )
+
+    if digital_human_provider == DIGITAL_HUMAN_MODE_SEEDANCE_DYNAMIC:
+        st.info(
+            "Seedance fast 保留头像模式会走 image_to_video，尽量保留上传头像身份，"
+            "叠加现有 TTS 音频；当前不是精准 lip-sync。"
+        )
+        digital_human_style_label = st.selectbox(
+            "数字人样式",
+            list(digital_human_style_options.keys()),
+            index=1,
+            help="卡片小窗会增加半透明容器、细边框和阴影，减少贴图感。",
+        )
+        digital_human_window_style = digital_human_style_options[digital_human_style_label]
+        digital_human_video_mode_label = st.selectbox(
+            "数字人视频模式",
+            list(digital_human_video_mode_options.keys()),
+            index=0,
+            help="正式完整时长会尽量生成接近视频长度的数字人视频，避免 5 秒短循环的重复感。",
+        )
+        digital_human_video_mode = digital_human_video_mode_options[digital_human_video_mode_label]
+        st.caption(
+            "当前 fast 保留头像；卡片小窗样式可减少贴图感。"
+            "正式完整时长会尽量生成接近视频长度的数字人视频。当前不是精准 lip-sync。"
+        )
+        force_regenerate_seedance_avatar = st.checkbox(
+            "强制重新生成 Seedance 动态人像",
+            value=False,
+        )
+        if st.button("清理 Seedance 动态人像缓存", key="clean_seedance_cache_btn"):
+            cache_dir = Path("outputs") / "seedance_cache"
+            if cache_dir.exists():
+                shutil.rmtree(cache_dir)
+            st.success("已清理 Seedance 动态人像缓存")
+    elif digital_human_provider in {
+        DIGITAL_HUMAN_MODE_SEEDANCE_T2V_VIRTUAL_2_0,
+        DIGITAL_HUMAN_MODE_SEEDANCE_T2V_VIRTUAL_2_0_FAST,
+    }:
+        st.info(
+            "Seedance 2.0 虚拟讲解人像会走 text_to_video 生成虚拟中文讲解人，"
+            "不使用上传头像，也不保证本人头像身份；当前不是精准 lip-sync。"
+        )
+    elif digital_human_provider == DIGITAL_HUMAN_MODE_SEEDANCE_I2V_AVATAR_2_0_EXPERIMENTAL:
+        st.warning(
+            "Seedance 2.0 image_to_video 会尝试使用上传头像生成保留真人头像的小窗视频。"
+            "当前真人头像可能触发隐私风控，需要官方授权素材或平台允许的人像素材；失败时不会静默回退。"
+        )
+        fallback_experimental_i2v_to_fast = st.checkbox(
+            "实验失败后自动回退到 Seedance fast 保留头像模式",
+            value=False,
+        )
+        _legacy_experimental_notice = (
+            "Seedance 2.0 真人头像 image_to_video 目前是实验模式，真人头像可能触发隐私风控；"
+            "本轮不会接入或调用该实验链路，生成时会沿用当前静态头像兜底。"
+        )
 
 # ══════════════════════════════════════════════════════════════
-# 5. 文件上传
+# 第 1 步（续）· 视频 / 头像 / Transcript 文件
 # ══════════════════════════════════════════════════════════════
 def _llm_env_missing(status):
     return not (
@@ -295,6 +304,136 @@ with st.expander("LLM 配置状态", expanded=not (
             "若要获得更准确的知识点模块切片，请配置 LLM_BASE_URL、LLM_API_KEY、LLM_MODEL。"
         )
 
+# ══════════════════════════════════════════════════════════════
+# 复用历史内容计划（跳过 STT / 不重复 LLM 切片）
+# ══════════════════════════════════════════════════════════════
+def _list_reusable_plans(limit=20):
+    outputs_dir = Path("outputs")
+    if not outputs_dir.exists():
+        return []
+    candidates = []
+    for project_dir in outputs_dir.iterdir():
+        if not project_dir.is_dir():
+            continue
+        render_jobs_path = project_dir / "render_jobs.json"
+        if not render_jobs_path.exists():
+            continue
+        try:
+            mtime = render_jobs_path.stat().st_mtime
+        except Exception:
+            continue
+        try:
+            payload = json.loads(render_jobs_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        if not payload.get("render_jobs"):
+            continue
+        candidates.append({
+            "project_dir": project_dir,
+            "mtime": mtime,
+            "render_jobs_count": len(payload.get("render_jobs") or []),
+            "video_topics_count": payload.get("video_topics_count") or 0,
+        })
+    candidates.sort(key=lambda x: x["mtime"], reverse=True)
+    return candidates[:limit]
+
+
+def _load_existing_plan(project_dir):
+    project_dir = Path(project_dir)
+    knowledge_path = project_dir / "knowledge_modules.json"
+    clips_path = project_dir / "clips.json"
+    if not knowledge_path.exists() or not clips_path.exists():
+        raise FileNotFoundError("缺少 knowledge_modules.json 或 clips.json")
+    knowledge_modules = json.loads(knowledge_path.read_text(encoding="utf-8"))
+    clips_data = json.loads(clips_path.read_text(encoding="utf-8"))
+    source_video_meta_path = project_dir / "source_video.json"
+    source_meta = {}
+    if source_video_meta_path.exists():
+        try:
+            source_meta = json.loads(source_video_meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            source_meta = {}
+    return {
+        "project_id": project_dir.name,
+        "project_dir": str(project_dir),
+        "knowledge_modules": knowledge_modules,
+        "clips": clips_data.get("clips") or [],
+        "cleaned_text": clips_data.get("cleaned_text") or "",
+        "clip_plan_mode": clips_data.get("clip_plan_mode") or "知识点模块切片",
+        "video_topics_count": len(knowledge_modules.get("video_topics") or []),
+        "plan_reusable": True,
+        "source_video_path": source_meta.get("source_video_path"),
+        "source_video_name": source_meta.get("source_video_name"),
+        "video_input_mode": source_meta.get("video_input_mode") or "upload",
+        "source_video_size_bytes": source_meta.get("source_video_size_bytes"),
+        "warnings": [],
+        "errors": [],
+    }
+
+
+_reusable_plans = _list_reusable_plans()
+with st.expander(
+    f"复用历史内容计划（{len(_reusable_plans)} 个可用）",
+    expanded=False,
+):
+    if not _reusable_plans:
+        st.caption("还没有可复用的历史内容计划。先在下方生成一份计划即可。")
+    else:
+        st.caption(
+            "选择已有的内容计划，跳过 STT 与 LLM 切片，直接进入"
+            "“选择短视频方案 → 生成视频”阶段。"
+        )
+        plan_labels = {}
+        for entry in _reusable_plans:
+            label = (
+                f"{entry['project_dir'].name}  ·  "
+                f"video_topics={entry['video_topics_count']}  ·  "
+                f"render_jobs={entry['render_jobs_count']}"
+            )
+            plan_labels[label] = entry["project_dir"]
+        selected_plan_label = st.selectbox(
+            "历史内容计划",
+            list(plan_labels.keys()),
+            key="reusable_plan_select",
+        )
+        if st.button("载入这个内容计划", key="reuse_plan_btn"):
+            target_dir = plan_labels.get(selected_plan_label)
+            try:
+                plan_state = _load_existing_plan(target_dir)
+                st.session_state["current_project_dir"] = plan_state["project_dir"]
+                st.session_state["current_video_name"] = plan_state.get("source_video_name")
+                st.session_state["current_source_video_path"] = plan_state.get("source_video_path")
+                st.session_state["current_video_input_mode"] = plan_state.get("video_input_mode")
+                st.session_state["current_source_video_size_bytes"] = plan_state.get("source_video_size_bytes")
+                st.session_state["plan_result"] = plan_state
+                st.session_state["per_clip_previews"] = {}
+                st.session_state["video_result"] = None
+                # Refresh render-plan / render-jobs pointers from disk.
+                rp_path = Path(plan_state["project_dir"]) / "selected_render_plan.json"
+                rj_path = Path(plan_state["project_dir"]) / "selected_render_jobs.json"
+                st.session_state["selected_render_plan_path"] = str(rp_path) if rp_path.exists() else None
+                st.session_state["selected_render_jobs_path"] = str(rj_path) if rj_path.exists() else None
+                st.success(
+                    f"已载入内容计划 {plan_state['project_id']}，"
+                    f"共 {plan_state.get('video_topics_count', 0)} 个推荐短视频方案。"
+                )
+                st.rerun()
+            except Exception as e:
+                st.error(f"载入失败：{e}")
+
+# 如果当前 session 已经有内容计划，主动提示用户可直接进入第二步。
+if st.session_state.get("plan_result") and st.session_state.get("current_project_dir"):
+    _cur_plan = st.session_state["plan_result"]
+    _topics_total = len((_cur_plan.get("knowledge_modules") or {}).get("video_topics") or []) if isinstance(_cur_plan.get("knowledge_modules"), dict) else 0
+    if _topics_total > 0 and _cur_plan.get("plan_reusable"):
+        st.info(
+            f"已存在内容计划（project={Path(_cur_plan['project_dir']).name}，"
+            f"{_topics_total} 个推荐短视频方案）。"
+            f"可直接在下方选择短视频方案并生成视频，不会重新 STT、不会重新 LLM 切片。"
+            f"如需重新生成，请用页面下方的“生成切片计划”按钮。"
+        )
+
+
 ALLOWED_VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".m4v"}
 
 
@@ -328,6 +467,10 @@ def _validate_external_video_path(path_text: str):
         return raw, None, f"文件不可读: {e}"
     return str(path.resolve()), size, None
 
+
+st.divider()
+st.markdown("## 1️⃣ 输入素材（视频 / 头像 / Transcript）")
+st.caption("左侧：录屏视频；右侧：数字人头像。如果上面选了「手动 / 上传转写文字」，下方还会出现 transcript 输入。")
 
 col_left, col_right = st.columns([2, 1])
 with col_left:
@@ -391,11 +534,11 @@ with col_right:
     avatar_file = st.file_uploader("上传头像图片", type=["png", "jpg", "jpeg"])
 
 # ══════════════════════════════════════════════════════════════
-# 6. 排版配置与预览  (布局逻辑沿用上一轮)
+# 第 4 步（续）· 字幕排版（默认 bottom-center 安全区，自动避让数字人）
 # ══════════════════════════════════════════════════════════════
 st.divider()
-st.subheader("排版配置")
-st.caption("字幕固定在左下角安全区，数字人固定在右下角。字幕不会进入数字人区域。")
+st.markdown("## 4️⃣ 字幕 / 排版")
+st.caption("默认字幕底部居中并自动避让右下角数字人；最多 2 行。下面字号、描边、背景都可调，并提供「预览当前排版」实时验证。")
 
 pc1, pc2, pc3 = st.columns(3)
 with pc1:
@@ -404,15 +547,54 @@ with pc1:
     avatar_margin_right = st.slider("数字人右边距(px)", 8, 80, 24, 2)
     avatar_margin_bottom = st.slider("数字人底部距离(px)", 30, 220, 100, 2)
 with pc2:
-    subtitle_size = st.slider("字幕字号(px)", 14, 30, 20, 1)
-    subtitle_margin_left = st.slider("字幕左边距(px)", 16, 120, 36, 2)
+    subtitle_size = st.slider(
+        "字幕字号(px)",
+        16, 48, 28, 1,
+        help="1080p 推荐 28–34；720p 推荐 20–24；480p 推荐 16–18。",
+    )
+    subtitle_margin_bottom = st.slider("字幕底部距离(px)", 20, 200, 80, 2)
     subtitle_max_width_ratio = st.slider(
-        "字幕最大宽度占比", 0.35, 0.70, 0.55, 0.01,
-        help="字幕宽度不超过视频宽度的此比例",
+        "字幕最大宽度占比", 0.35, 0.80, 0.62, 0.01,
+        help="字幕宽度不超过视频宽度的此比例；超过会自动换行至 2 行。",
     )
 with pc3:
     title_size = st.slider("标题字号(px)", 18, 42, 28, 1)
-    subtitle_margin_bottom = st.slider("字幕底部距离(px)", 20, 180, 40, 2)
+    subtitle_align = st.radio(
+        "字幕对齐",
+        ["center", "left", "right"],
+        index=0,
+        horizontal=True,
+        help="默认底部居中并自动避让右下角数字人小窗。",
+    )
+    subtitle_margin_left = st.slider(
+        "字幕水平安全边距(px)", 16, 120, 36, 2,
+        help="左右两侧各预留这么多像素的安全边距，避免贴边。",
+    )
+
+with st.expander("字幕样式（描边 / 阴影 / 背景）", expanded=False):
+    sc1, sc2, sc3 = st.columns(3)
+    with sc1:
+        subtitle_outline_width = st.slider(
+            "描边粗细", 0.0, 6.0, 2.5, 0.5,
+            help="0 表示无描边；横屏录屏建议 2–3。",
+        )
+    with sc2:
+        subtitle_shadow_depth = st.slider(
+            "阴影深度", 0.0, 4.0, 1.0, 0.5,
+            help="0 表示无阴影；纯黑描边可读性最高时可调小。",
+        )
+    with sc3:
+        subtitle_show_box = st.toggle(
+            "显示半透明背景条",
+            value=False,
+            help="开启后字幕背后加深色背景条，强对比但更显厚重。",
+        )
+        subtitle_box_opacity = st.slider(
+            "背景条不透明度",
+            0, 255, 140, 5,
+            help="开启背景条时生效；数值越大背景越显眼。",
+            disabled=not subtitle_show_box,
+        )
 
 
 def _build_layout_config() -> LayoutConfig:
@@ -424,6 +606,11 @@ def _build_layout_config() -> LayoutConfig:
         subtitle_margin_left=subtitle_margin_left,
         subtitle_margin_bottom=subtitle_margin_bottom,
         subtitle_max_width_ratio=subtitle_max_width_ratio,
+        subtitle_align=subtitle_align,
+        subtitle_outline_width=subtitle_outline_width,
+        subtitle_shadow_depth=subtitle_shadow_depth,
+        subtitle_show_box=subtitle_show_box,
+        subtitle_box_opacity=subtitle_box_opacity,
         title_size=title_size,
     )
 
@@ -512,10 +699,11 @@ if st.button("预览当前排版"):
                 st.error(f"预览失败: {e}")
 
 # ══════════════════════════════════════════════════════════════
-# 7. 按钮一：生成切片计划
+# 第 2 步 · 生成内容计划（CTA 1：只跑 STT / 清洗 / 切片，不生成视频）
 # ══════════════════════════════════════════════════════════════
 st.divider()
-st.subheader("第一步：生成切片计划")
+st.markdown("## 2️⃣ 生成内容计划")
+st.caption("只跑 STT、文本清洗、知识点切片和短视频方案规划，**不会**生成最终 MP4。")
 
 if input_mode_label.startswith("手动"):
     st.warning("手动文字没有真实时间戳，切片时间为估算；精准切片请使用自动转写模式。")
@@ -599,10 +787,19 @@ if st.button("生成切片计划", type="primary", use_container_width=True):
             st.session_state["selected_render_plan_path"] = str(
                 Path(result["project_dir"]) / "selected_render_plan.json"
             ) if (Path(result["project_dir"]) / "selected_render_plan.json").exists() else None
-            st.success(
-                f"切片计划生成成功 ({clip_plan_mode})，"
-                f"共 {len(result['clips'])} 个 clip / {len(result.get('knowledge_modules') or [])} 个 module"
-            )
+            km = result.get("knowledge_modules") or {}
+            if isinstance(km, dict):
+                topic_count = len(km.get("video_topics") or [])
+                visible_kp_count = len(km.get("user_visible_kp_ids") or km.get("knowledge_points") or [])
+                st.success(
+                    f"切片计划生成成功 ({clip_plan_mode})，"
+                    f"共 {topic_count} 个推荐短视频方案 / 用户可选 {visible_kp_count} 个知识点。"
+                )
+            else:
+                st.success(
+                    f"切片计划生成成功 ({clip_plan_mode})，"
+                    f"共 {len(result['clips'])} 个 clip / {len(km)} 个旧版 module（建议重新生成）"
+                )
         elif not result.get("errors"):
             st.error("切片计划生成失败，未返回任何片段")
 
@@ -613,7 +810,8 @@ if st.button("生成切片计划", type="primary", use_container_width=True):
 plan_result = st.session_state.get("plan_result")
 if plan_result and plan_result.get("clips"):
     st.divider()
-    st.subheader("切片计划")
+    st.markdown("## 3️⃣ 选择要生成的短视频")
+    st.caption("已生成内容计划。下面只展示推荐短视频方案；semantic_units / fragments 等内部结构在「高级调试信息」里。")
 
     project_id = plan_result.get("project_id", "plan")
     project_dir = plan_result.get("project_dir")
@@ -711,273 +909,224 @@ if plan_result and plan_result.get("clips"):
                 debug_path = Path(project_dir) / "debug"
                 st.caption(f"debug 目录: `{debug_path}`")
 
-    # ── Branch A: 知识点模块切片 → 模块/片段勾选 UI ───────────────────────
+    # ── Branch A: 知识点模块切片 → 推荐短视频方案 (video_topics) ──────────
     if (
         isinstance(plan_result.get("knowledge_modules"), dict)
         and plan_result["knowledge_modules"].get("knowledge_points")
     ):
         semantic_plan = plan_result["knowledge_modules"]
-        st.markdown("## 选择视频选题")
+        topics = semantic_plan.get("video_topics") or []
+        if not topics:
+            # 兜底：老缓存计划没有 video_topics，现场补一份（仅在内存，不写回 disk）。
+            try:
+                kp.build_video_topics_from_plan(semantic_plan)
+                topics = semantic_plan.get("video_topics") or []
+            except Exception as e:
+                st.warning(f"自动补齐 video_topics 失败: {e}")
+
+        points = semantic_plan.get("knowledge_points") or []
+        points_by_id = {kp_item.get("kp_id"): kp_item for kp_item in points}
+        user_visible_ids = set(semantic_plan.get("user_visible_kp_ids") or [kp_item.get("kp_id") for kp_item in points])
+
+        # 1. 内容总结（普通用户可见）
+        st.markdown("## 内容总结")
         summary = semantic_plan.get("source_summary") or {}
         st.info(
-            f"主题: {summary.get('main_topic', '')} | "
-            f"类型: {summary.get('content_type', '')} | "
-            f"适合: {', '.join(summary.get('suitable_video_styles') or [])}"
+            f"主题：{summary.get('main_topic', '(未识别)')}  ·  "
+            f"内容类型：{summary.get('content_type', '(未知)')}  ·  "
+            f"用户可选知识点：{len(user_visible_ids)} / 全部 {len(points)}  ·  "
+            f"推荐方案：{len(topics)} 个"
         )
-        hooks = semantic_plan.get("big_hooks") or []
-        paths = semantic_plan.get("assembly_paths") or []
-        points = semantic_plan.get("knowledge_points") or []
-        points_by_id = {kp.get("kp_id"): kp for kp in points}
-        hook_options = {h.get("hook_title") or h.get("hook_id"): h.get("hook_id") for h in hooks}
-        selected_hook_label = st.selectbox(
-            "选择视频选题",
-            list(hook_options.keys()) or ["未生成"],
-            key=f"hook_select_{project_id}",
-        )
-        selected_hook_id = hook_options.get(selected_hook_label)
-        selected_hook = next((h for h in hooks if h.get("hook_id") == selected_hook_id), {})
-        path_priority = {"short_video": 0, "boss_report": 1, "tutorial": 2, "operation_demo": 3}
-        selected_path = sorted(paths, key=lambda p: path_priority.get(p.get("recommended_for"), 99))[0] if paths else {}
-        selected_path_id = selected_path.get("path_id")
-        recommended_ids = selected_hook.get("recommended_kp_ids") or selected_path.get("ordered_kp_ids") or [kp.get("kp_id") for kp in points]
-        optional_ids = selected_hook.get("optional_kp_ids") or []
-        hook_kp_ids = list(dict.fromkeys(recommended_ids + optional_ids))
-        if not hook_kp_ids:
-            hook_kp_ids = [kp.get("kp_id") for kp in points]
+        if summary.get("speaker_intent"):
+            st.caption(f"讲者意图：{summary.get('speaker_intent')}")
+        if summary.get("overall_quality_notes"):
+            st.caption(f"质量说明：{summary.get('overall_quality_notes')}")
 
-        st.markdown(f"**开头钩子：** {selected_hook.get('opening_hook', '')}")
-        st.markdown(f"**选题摘要：** {selected_hook.get('hook_summary', '')}")
-        st.caption(
-            f"预计时长：{selected_hook.get('estimated_duration') or selected_path.get('estimated_duration') or '待估算'} 秒 | "
-            f"推荐知识点数量：{len(recommended_ids)}"
-        )
-
-        ordered_ids = []
-        type_labels = {
-            "problem": "痛点问题",
-            "concept": "概念原理",
-            "principle": "底层原理",
-            "operation": "操作步骤",
-            "implementation": "技术实现",
-            "workflow": "流程链路",
-            "tool_usage": "工具调用",
-            "business_value": "业务价值",
-            "pitfall": "风险注意",
-            "summary": "总结归纳",
-        }
-        st.markdown("## 选择本条视频包含的知识点")
-        for kid in hook_kp_ids:
-            kp_item = points_by_id.get(kid)
-            if not kp_item:
-                continue
-            key = f"kp_select_{project_id}_{kid}"
-            checked = st.checkbox(
-                kp_item.get("kp_title") or kid,
-                value=st.session_state.get(key, kid in recommended_ids),
-                key=key,
-            )
-            st.caption(
-                f"类型：{type_labels.get(kp_item.get('kp_type'), kp_item.get('kp_type') or '未分类')} | "
-                f"摘要：{kp_item.get('kp_summary', '')}"
-            )
-            st.caption(f"推荐理由：{kp_item.get('selection_reason', '')}")
-            try:
-                dur = sum(
-                    max(0.0, float(f.get("end", 0) or 0) - float(f.get("start", 0) or 0))
-                    for f in (kp_item.get("fragments") or [])
-                )
-            except Exception:
-                dur = 0.0
-            st.caption(f"预计时长：{dur:.1f} 秒")
-            if checked:
-                ordered_ids.append(kid)
-            with st.expander(f"查看 {kid} 详情", expanded=False):
-                st.write("selection_reason", kp_item.get("selection_reason"))
-                st.write("dependencies", kp_item.get("dependencies"))
-                st.markdown("**voice_script**")
-                st.write(kp_item.get("voice_script", ""))
-                st.markdown("**subtitle_lines**")
-                st.write(kp_item.get("subtitle_lines", []))
-                for frag in kp_item.get("fragments") or []:
-                    st.write({"fragment_id": frag.get("fragment_id"), "start": frag.get("start"), "end": frag.get("end"), "reason": frag.get("reason")})
-
-        selected_set = set(ordered_ids)
-        missing = []
-        for kid in ordered_ids:
-            for required in (points_by_id.get(kid, {}).get("dependencies") or {}).get("requires") or []:
-                if required not in selected_set:
-                    missing.append(f"{kid} 缺少前置知识点 {required}")
-        if missing:
-            st.warning("当前选择缺少前置知识点：" + "；".join(missing))
-        if len(ordered_ids) == 1:
-            st.warning("当前只选择了 1 个知识点，最终视频会较短。")
-        elif ordered_ids and len(ordered_ids) < 3:
-            st.info("推荐选择 3–5 个知识点，讲解会更完整。")
-
-        export_mode_label = "生成一条完整讲解短视频"
-        with st.expander("高级调试信息", expanded=False):
-            st.write("系统推荐路径", {
-                "path_id": selected_path_id,
-                "path_title": selected_path.get("path_title"),
-                "recommended_for": selected_path.get("recommended_for"),
-                "narrative_structure": selected_path.get("narrative_structure"),
-                "ordered_kp_ids": selected_path.get("ordered_kp_ids"),
-            })
-            export_mode_label = st.radio(
-                "导出模式",
-                ["生成一条完整讲解短视频", "分知识点分别导出多个视频"],
-                index=0,
-                key=f"export_mode_{project_id}",
-            )
-            st.json({
-                "selected_hook_id": selected_hook_id,
-                "selected_kp_ids": ordered_ids,
-                "all_big_hooks": hooks,
-                "assembly_paths": paths,
-            })
-
-        render_output_mode = "multiple_kp_videos" if export_mode_label == "分知识点分别导出多个视频" else "single_complete_video"
-        final_kp_ids = [kid for kid in ordered_ids if kid in points_by_id]
-        if final_kp_ids:
-            plan_payload = kp.build_selected_render_plan(
-                selected_module_ids=final_kp_ids,
-                selected_fragment_ids=[],
-                knowledge_modules=semantic_plan,
-                fragment_order="user_order",
-                voice_style=voice_style,
-                title=selected_hook.get("hook_title") or "完整讲解短视频",
-            )
-            plan_payload["render_output_mode"] = render_output_mode
-            plan_payload["selected_hook_id"] = selected_hook_id
-            plan_payload["selected_hook_ids"] = [selected_hook_id] if selected_hook_id else []
-            plan_payload["selected_assembly_path_id"] = selected_path_id
-            plan_payload["final_video_title"] = selected_hook.get("hook_title") or "完整讲解短视频"
-            plan_payload["final_video_opening_hook"] = selected_hook.get("opening_hook") or ""
-            plan_payload["final_video_structure"] = "按所选知识点顺序讲解"
-            plan_payload["visible_output_count"] = 1 if render_output_mode == "single_complete_video" else len(plan_payload.get("render_units") or [])
-            try:
-                saved_path = save_selected_render_plan(project_dir, plan_payload)
-                st.session_state["selected_render_plan_path"] = saved_path
-            except Exception as e:
-                st.error(f"保存渲染计划失败: {e}")
+        # 2. 推荐短视频方案（多选，每条选中的方案最终输出一条独立短视频）
+        st.markdown("## 推荐短视频方案（可勾选多个，每个生成一条完整短视频）")
+        st.caption("内容计划已生成并保存，后续生成视频会复用现有计划，不会重新提取转写或重新切片。")
+        selected_topic_ids = []
+        if not topics:
+            st.error("当前计划没有可用的短视频方案，请重新生成内容计划。")
         else:
-            st.warning("请至少选择 1 个知识点。")
+            # 读取本项目的 render_jobs.json；旧项目可能没有，现场补一份。
+            render_jobs_path = Path(project_dir) / "render_jobs.json" if project_dir else None
+            render_jobs_data = {}
+            if render_jobs_path and render_jobs_path.exists():
+                try:
+                    render_jobs_data = json.loads(render_jobs_path.read_text(encoding="utf-8"))
+                except Exception as e:
+                    st.warning(f"读取 render_jobs.json 失败：{e}")
+            if not render_jobs_data.get("render_jobs"):
+                try:
+                    render_jobs_data = kp.build_render_jobs_from_topics(semantic_plan, voice_style=voice_style)
+                    render_jobs_data["project_id"] = project_id
+                    render_jobs_data["plan_reusable"] = bool(render_jobs_data.get("render_jobs"))
+                    if project_dir:
+                        (Path(project_dir) / "render_jobs.json").write_text(
+                            json.dumps(render_jobs_data, ensure_ascii=False, indent=2), encoding="utf-8"
+                        )
+                except Exception as e:
+                    st.error(f"无法构造 render_jobs：{e}")
+            jobs_by_topic_id = {j.get("topic_id"): j for j in (render_jobs_data.get("render_jobs") or [])}
 
-        rp_path = st.session_state.get("selected_render_plan_path")
-        if rp_path and Path(rp_path).exists():
-            st.caption(f"这些知识点将组成一条完整视频。当前 selected_render_plan.json: `{rp_path}`")
-    elif isinstance(plan_result.get("knowledge_modules"), list) and plan_result.get("knowledge_modules"):
-        st.markdown("## 知识点模块（勾选要生成的内容）")
-        modules = plan_result["knowledge_modules"]
+            # 多选 UI：每个 topic 一个 checkbox
+            sel_col1, sel_col2 = st.columns([1, 1])
+            with sel_col1:
+                if st.button("全选所有方案", key=f"topic_all_{project_id}"):
+                    for t in topics:
+                        st.session_state[f"topic_pick_{project_id}_{t.get('topic_id')}"] = True
+            with sel_col2:
+                if st.button("全部取消", key=f"topic_none_{project_id}"):
+                    for t in topics:
+                        st.session_state[f"topic_pick_{project_id}_{t.get('topic_id')}"] = False
 
-        # All-on / all-off shortcuts
-        kp_col1, kp_col2, kp_col3 = st.columns([1, 1, 4])
-        with kp_col1:
-            if st.button("全选所有模块"):
-                for m in modules:
-                    st.session_state[f"km_mod_{project_id}_{m['module_id']}"] = True
-                    for f in m.get("fragments") or []:
-                        st.session_state[f"km_frag_{project_id}_{f['fragment_id']}"] = True
-        with kp_col2:
-            if st.button("全部取消"):
-                for m in modules:
-                    st.session_state[f"km_mod_{project_id}_{m['module_id']}"] = False
-                    for f in m.get("fragments") or []:
-                        st.session_state[f"km_frag_{project_id}_{f['fragment_id']}"] = False
-
-        for m in modules:
-            mid = m["module_id"]
-            mod_key = f"km_mod_{project_id}_{mid}"
-            st.markdown(f"### {m.get('module_title', mid)}  (`{mid}`)")
-            mod_checked = st.checkbox(
-                f"选择整个模块 — topic_key=`{m.get('topic_key','')}`，"
-                f"共 {len(m.get('fragments') or [])} 个 fragment，"
-                f"建议时长 {m.get('suggested_duration', '?')}s",
-                key=mod_key,
-                value=st.session_state.get(mod_key, False),
-            )
-            if m.get("hook"):
-                st.markdown(f"**钩子：** {m['hook']}")
-            if m.get("summary"):
-                st.markdown(f"**摘要：** {m['summary']}")
-            if m.get("knowledge_points"):
-                st.markdown("**知识点：** " + "；".join(m["knowledge_points"]))
-
-            for f in (m.get("fragments") or []):
-                fid = f["fragment_id"]
-                frag_key = f"km_frag_{project_id}_{fid}"
-                start_s = float(f.get("start", 0) or 0)
-                end_s = float(f.get("end", 0) or 0)
-                # If module checked, default frag to checked unless user has set it
-                default_checked = st.session_state.get(frag_key,
-                                                      st.session_state.get(mod_key, False))
-                st.checkbox(
-                    f"`{fid}`  [{format_seconds(start_s)} - {format_seconds(end_s)}]  "
-                    f"({end_s - start_s:.1f}s)  — {f.get('reason', '')}",
-                    key=frag_key,
-                    value=default_checked,
+            for idx, t in enumerate(topics):
+                tid = t.get("topic_id") or f"topic_{idx+1:03d}"
+                key = f"topic_pick_{project_id}_{tid}"
+                default_checked = st.session_state.get(key, idx == 0)
+                kp_ids_for_topic = [kid for kid in (t.get("recommended_kp_ids") or []) if kid in points_by_id]
+                label = (
+                    f"{t.get('topic_title') or tid}"
+                    f"  ·  {t.get('video_type', 'short_video')}"
+                    f"  ·  ≈ {t.get('estimated_duration', '?')}s"
+                    f"  ·  {len(kp_ids_for_topic)} 个知识点"
                 )
-                with st.expander(f"{fid} 文本", expanded=False):
-                    st.markdown("**source_text**"); st.write(f.get("source_text", "") or "(空)")
-                    st.markdown("**cleaned_text**"); st.write(f.get("cleaned_text", "") or "(空)")
-            st.divider()
+                picked = st.checkbox(label, value=default_checked, key=key)
+                if t.get("topic_hook"):
+                    st.caption(f"开场：{t.get('topic_hook')}")
+                if t.get("topic_summary"):
+                    st.caption(f"内容：{t.get('topic_summary')}")
+                if t.get("is_auto_supplemented"):
+                    st.caption("⚙ 自动补齐方案")
+                with st.expander(
+                    f"查看 {tid} 包含的 {len(kp_ids_for_topic)} 个知识点",
+                    expanded=False,
+                ):
+                    for kid in kp_ids_for_topic:
+                        kp_item = points_by_id.get(kid) or {}
+                        st.markdown(f"- **{kp_item.get('kp_title') or kid}**  (`{kid}`, {kp_item.get('kp_type', '?')})")
+                        if kp_item.get("kp_summary"):
+                            st.caption(kp_item.get("kp_summary"))
+                if picked and kp_ids_for_topic:
+                    selected_topic_ids.append(tid)
 
-        # 顺序 + 标题 + 保存按钮
-        oc1, oc2 = st.columns([1, 2])
-        with oc1:
-            fragment_order = st.radio(
-                "fragment 顺序",
-                ["source_time", "user_order"],
-                index=0,
-                format_func=lambda x: "按原视频时间" if x == "source_time" else "按勾选顺序",
-                key=f"frag_order_{project_id}",
-            )
-        with oc2:
-            render_title = st.text_input(
-                "渲染合集标题",
-                value=f"{plan_mode}_{Path(project_dir).name if project_dir else 'preview'}",
-                key=f"render_title_{project_id}",
-            )
+            if not selected_topic_ids:
+                st.info("请至少勾选一个短视频方案。")
+            else:
+                st.success(f"已选 {len(selected_topic_ids)} 个方案，将各生成一条完整短视频。")
 
-        if st.button("保存当前选择为渲染计划", type="primary"):
-            selected_mod_ids = [m["module_id"] for m in modules
-                                if st.session_state.get(f"km_mod_{project_id}_{m['module_id']}")]
-            selected_frag_ids = [f["fragment_id"]
-                                 for m in modules for f in (m.get("fragments") or [])
-                                 if st.session_state.get(f"km_frag_{project_id}_{f['fragment_id']}")]
-            plan_payload = kp.build_selected_render_plan(
-                selected_module_ids=selected_mod_ids,
-                selected_fragment_ids=selected_frag_ids,
-                knowledge_modules=modules,
-                fragment_order=fragment_order,
-                voice_style=voice_style,
-                title=render_title,
-            )
+        # 3. 把当前勾选写成 selected_render_jobs.json
+        selected_jobs_path = None
+        if selected_topic_ids:
+            selected_jobs_payload = {
+                "project_id": project_id,
+                "plan_reusable": True,
+                "voice_style": voice_style,
+                "selected_topic_ids": selected_topic_ids,
+                "selected_job_ids": [],
+                "render_jobs": [],
+                "render_output_mode": "single_complete_video",
+            }
+            for tid in selected_topic_ids:
+                job = jobs_by_topic_id.get(tid)
+                if not job:
+                    continue
+                selected_jobs_payload["render_jobs"].append(job)
+                if job.get("job_id"):
+                    selected_jobs_payload["selected_job_ids"].append(job.get("job_id"))
             try:
-                saved_path = save_selected_render_plan(project_dir, plan_payload)
-                st.session_state["selected_render_plan_path"] = saved_path
-                total_frags = len(plan_payload["render_jobs"][0]["fragments"])
-                total_dur = sum(
-                    float(f.get("end", 0) or 0) - float(f.get("start", 0) or 0)
-                    for f in plan_payload["render_jobs"][0]["fragments"]
+                target_path = Path(project_dir) / "selected_render_jobs.json"
+                target_path.write_text(
+                    json.dumps(selected_jobs_payload, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
-                st.success(
-                    f"已保存渲染计划：{Path(saved_path).name}  "
-                    f"({total_frags} 个 fragment，总时长约 {total_dur:.1f}s)"
-                )
-                st.json({
-                    "selected_module_ids": plan_payload["render_jobs"][0]["selected_module_ids"],
-                    "selected_fragment_ids": plan_payload["render_jobs"][0]["selected_fragment_ids"],
-                    "fragment_order": fragment_order,
-                    "voice_style": voice_style,
-                })
+                selected_jobs_path = str(target_path)
+                st.session_state["selected_render_jobs_path"] = selected_jobs_path
+                # 保持向后兼容：第一份单 plan 仍然写一份（生成按钮内会优先用 jobs 路径）。
+                if selected_jobs_payload["render_jobs"]:
+                    first_job = selected_jobs_payload["render_jobs"][0]
+                    first_plan = {
+                        "selected_topic_id": first_job.get("topic_id"),
+                        "selected_hook_id": first_job.get("selected_hook_id"),
+                        "selected_hook_ids": [first_job.get("selected_hook_id")] if first_job.get("selected_hook_id") else [],
+                        "selected_kp_ids": first_job.get("selected_kp_ids") or [],
+                        "render_units": first_job.get("render_units") or [],
+                        "render_output_mode": "single_complete_video",
+                        "fragment_order": first_job.get("fragment_order") or "user_order",
+                        "voice_style": voice_style,
+                        "title": first_job.get("topic_title"),
+                        "final_video_title": first_job.get("topic_title"),
+                        "final_video_opening_hook": first_job.get("topic_hook") or "",
+                        "final_video_structure": "按所选知识点顺序讲解",
+                        "video_type": first_job.get("video_type") or "short_video",
+                        "visible_output_count": 1,
+                    }
+                    save_selected_render_plan(project_dir, first_plan)
+                    st.session_state["selected_render_plan_path"] = str(Path(project_dir) / "selected_render_plan.json")
             except Exception as e:
-                st.error(f"保存渲染计划失败: {e}")
+                st.error(f"保存 selected_render_jobs.json 失败：{e}")
+        else:
+            st.session_state["selected_render_jobs_path"] = None
+        if selected_jobs_path:
+            st.caption(f"selected_render_jobs.json：`{selected_jobs_path}`")
 
-        # Show currently-on-disk render plan
-        rp_path = st.session_state.get("selected_render_plan_path")
-        if rp_path and Path(rp_path).exists():
-            st.caption(f"当前 selected_render_plan.json: `{rp_path}`")
+        # 4. 高级调试信息（开发者用，默认折叠；普通用户看不到 fragments / units）
+        with st.expander("高级调试信息（开发者用）", expanded=False):
+            st.markdown("### kp_cap_summary")
+            st.json(semantic_plan.get("kp_cap_summary") or {})
+            st.markdown("### user_visible_kp_ids / advanced_kp_ids")
+            st.write({
+                "user_visible_kp_ids": semantic_plan.get("user_visible_kp_ids") or [],
+                "advanced_kp_ids": semantic_plan.get("advanced_kp_ids") or [],
+            })
+            st.markdown("### 全部 knowledge_points（含 visibility）")
+            for kp_item in points:
+                marker = "[advanced]" if kp_item.get("visibility") == "advanced" else "[user]"
+                kp_id_str = kp_item.get("kp_id") or "?"
+                title_str = kp_item.get("kp_title") or "(无标题)"
+                st.markdown(f"- {marker} `{kp_id_str}` — {title_str}")
+                try:
+                    duration_str = f"{float(kp_item.get('duration', 0) or 0):.1f}s"
+                except Exception:
+                    duration_str = "?s"
+                st.caption(
+                    f"type={kp_item.get('kp_type')} | duration={duration_str} | "
+                    f"importance={(kp_item.get('scores') or {}).get('importance', '?')} | "
+                    f"reason={kp_item.get('advanced_reason') or '-'}"
+                )
+            st.markdown("### big_hooks（后台推荐排序，不直接暴露给用户）")
+            st.json(semantic_plan.get("big_hooks") or [])
+            st.markdown("### assembly_paths（后台叙事结构，不直接暴露给用户）")
+            st.json(semantic_plan.get("assembly_paths") or [])
+            st.markdown("### semantic_units / fragments（仅调试，普通模式隐藏）")
+            st.json(semantic_plan.get("semantic_units") or [])
+            st.markdown("### 当前 selected_render_plan.json")
+            try:
+                if rp_path and Path(rp_path).exists():
+                    st.json(json.loads(Path(rp_path).read_text(encoding="utf-8")))
+            except Exception as e:
+                st.warning(f"读取 selected_render_plan 失败：{e}")
+
+    elif isinstance(plan_result.get("knowledge_modules"), list) and plan_result.get("knowledge_modules"):
+        modules = plan_result["knowledge_modules"]
+        total_frags = sum(len(m.get("fragments") or []) for m in modules)
+        st.warning(
+            "这是旧版计划结构（knowledge_modules 是 list），请重新生成内容计划以获得新的短视频方案视图。"
+        )
+        st.caption(
+            f"统计：{len(modules)} 个旧版 module / {total_frags} 个 fragment（未直接展示）"
+        )
+        with st.expander("高级调试信息：旧版 modules / fragments", expanded=False):
+            for m in modules:
+                st.markdown(
+                    f"- **{m.get('module_title', m.get('module_id', '?'))}** "
+                    f"(`{m.get('module_id', '?')}`, topic_key=`{m.get('topic_key', '')}`)"
+                )
+                st.caption(
+                    f"fragments={len(m.get('fragments') or [])} | hook={m.get('hook', '')}"
+                )
+                if m.get("knowledge_points"):
+                    st.caption("旧版知识点：" + "；".join(m["knowledge_points"]))
     # ── Branch B: 时间线连续切片 → 旧的 clip 编辑 UI ─────────────────────
     else:
         st.markdown("## 切片清单（可编辑）")
@@ -1022,10 +1171,10 @@ if plan_result and plan_result.get("clips"):
 # 9. 按钮二：根据当前选择生成视频
 # ══════════════════════════════════════════════════════════════
 st.divider()
-st.subheader("第二步：生成一条完整讲解短视频")
+st.markdown("## 5️⃣ 生成所选短视频")
 st.caption(
-    "知识点模块切片：所选知识点会按顺序组成一条完整讲解短视频。"
-    "时间线切片：使用 clips.json 中的每个 clip。"
+    "复用现有内容计划，**不会重新 STT、不会重新 LLM 切片**。"
+    "勾选了几个 video_topic 就生成几条独立 MP4，每条命名按 topic_id 隔离。"
 )
 
 proj_dir_for_gate = st.session_state.get("current_project_dir")
@@ -1045,9 +1194,13 @@ if proj_dir_for_gate:
                     selected_render_plan=render_for_gate,
                     require_assembly=False,
                 )
-                if render_for_gate is not None and not render_for_gate.get("selected_hook_id"):
+                if render_for_gate is not None and not (
+                    render_for_gate.get("selected_topic_id")
+                    or render_for_gate.get("selected_hook_id")
+                    or render_for_gate.get("selected_kp_ids")
+                ):
                     quality_gate_ok = False
-                    quality_gate_reasons.append("必须选择一个 big_hook")
+                    quality_gate_reasons.append("必须选择一个短视频方案")
                 with st.expander("知识点切片质量门禁", expanded=not quality_gate_ok):
                     st.write({
                         "can_enter_video_generation": quality_gate_ok,
@@ -1093,7 +1246,7 @@ if proj_dir_for_gate and not quality_gate_ok:
         except Exception as e:
             st.error(f"自动修复切片计划失败: {e}")
 
-if st.button("生成一条完整讲解短视频", type="primary", use_container_width=True, key="gen_video_btn", disabled=not quality_gate_ok):
+if st.button("生成所选短视频", type="primary", use_container_width=True, key="gen_video_btn", disabled=not quality_gate_ok):
     proj_dir = st.session_state.get("current_project_dir")
     v_name = st.session_state.get("current_video_name")
     a_name = st.session_state.get("current_avatar_name")
@@ -1126,39 +1279,152 @@ if st.button("生成一条完整讲解短视频", type="primary", use_container_
                     st.error(f"声音样本保存失败或为空: {pp.name}")
 
         layout_cfg = _build_layout_config()
+        selected_jobs_path = st.session_state.get("selected_render_jobs_path")
+        if selected_jobs_path and not Path(selected_jobs_path).exists():
+            selected_jobs_path = None
         render_plan_path = st.session_state.get("selected_render_plan_path")
         if render_plan_path and not Path(render_plan_path).exists():
             render_plan_path = None
 
-        with st.spinner("正在生成视频..."):
-            result = generate_videos_from_plan(
-                project_dir=proj_dir,
-                video_name=v_name,
-                avatar_name=a_name,
-                audio_mode=audio_mode,
-                layout_config=layout_cfg,
-                voice_sample_paths=voice_sample_paths,
-                voice_name=voice_name,
-                remove_background_noise=remove_background_noise,
-                voice_consent=voice_consent,
-                voice_style=voice_style,
-                render_plan_path=render_plan_path,
-                digital_human_provider=digital_human_provider,
-                force_regenerate_seedance_avatar=force_regenerate_seedance_avatar,
-                seedance_quality_mode=seedance_quality_mode,
-                digital_human_window_style=digital_human_window_style,
-                digital_human_video_mode=digital_human_video_mode,
-                fallback_experimental_i2v_to_fast=fallback_experimental_i2v_to_fast,
-                source_video_path=st.session_state.get("current_source_video_path"),
-                video_input_mode=st.session_state.get("current_video_input_mode"),
-                source_video_size_bytes=st.session_state.get("current_source_video_size_bytes"),
-                source_audio_clone_target_seconds=source_audio_clone_target_seconds,
-            )
+        common_kwargs = dict(
+            audio_mode=audio_mode,
+            layout_config=layout_cfg,
+            voice_sample_paths=voice_sample_paths,
+            voice_name=voice_name,
+            remove_background_noise=remove_background_noise,
+            voice_consent=voice_consent,
+            voice_style=voice_style,
+            digital_human_provider=digital_human_provider,
+            force_regenerate_seedance_avatar=force_regenerate_seedance_avatar,
+            seedance_quality_mode=seedance_quality_mode,
+            digital_human_window_style=digital_human_window_style,
+            digital_human_video_mode=digital_human_video_mode,
+            fallback_experimental_i2v_to_fast=fallback_experimental_i2v_to_fast,
+            source_video_path=st.session_state.get("current_source_video_path"),
+            video_input_mode=st.session_state.get("current_video_input_mode"),
+            source_video_size_bytes=st.session_state.get("current_source_video_size_bytes"),
+            source_audio_clone_target_seconds=source_audio_clone_target_seconds,
+        )
+
+        if selected_jobs_path:
+            # 前置 schema 校验：缺字段时直接报错，不进入渲染。
+            try:
+                preview_payload = json.loads(Path(selected_jobs_path).read_text(encoding="utf-8"))
+            except Exception as e:
+                preview_payload = {}
+                st.error(f"读取 selected_render_jobs.json 失败：{e}")
+            ok_schema, schema_reasons, schema_metrics = kp.validate_selected_render_jobs(preview_payload)
+            if not ok_schema:
+                for reason in schema_reasons:
+                    st.error(reason)
+                st.stop()
+            batch_status = st.empty()
+            batch_progress = st.progress(0.0, text="准备批量生成...")
+            total_jobs = schema_metrics.get("render_jobs_count") or 1
+
+            def _batch_progress(event):
+                stage = (event or {}).get("stage") or ""
+                total = (event or {}).get("total_jobs") or total_jobs
+                current = (event or {}).get("current_job") or 0
+                title = (event or {}).get("topic_title") or (event or {}).get("topic_id") or ""
+                successes = (event or {}).get("successful_jobs", 0)
+                failures = (event or {}).get("failed_jobs", 0)
+                if stage == "batch_start":
+                    batch_status.info(f"准备渲染 {total} 条短视频...")
+                elif stage == "job_start":
+                    batch_progress.progress(min(1.0, (current - 1) / max(1, total)),
+                                            text=f"正在生成第 {current}/{total} 条：{title}")
+                    batch_status.info(
+                        f"正在生成第 {current}/{total} 条：**{title}**  "
+                        f"·  已成功 {successes}  ·  已失败 {failures}"
+                    )
+                elif stage == "job_done":
+                    batch_progress.progress(min(1.0, current / max(1, total)),
+                                            text=f"第 {current}/{total} 条完成（{title}）")
+                    batch_status.info(
+                        f"已完成 {current}/{total}  ·  成功 {successes}  ·  失败 {failures}"
+                    )
+                elif stage == "batch_done":
+                    batch_progress.progress(1.0, text="全部完成")
+                    batch_status.success(
+                        f"全部完成：共 {total} 条，成功 {successes}，失败 {failures}。"
+                    )
+
+            with st.spinner("复用现有内容计划，正在按所选方案批量生成短视频..."):
+                result = generate_videos_from_render_jobs(
+                    project_dir=proj_dir,
+                    video_name=v_name,
+                    avatar_name=a_name,
+                    selected_render_jobs_path=selected_jobs_path,
+                    progress_callback=_batch_progress,
+                    **common_kwargs,
+                )
+        else:
+            with st.spinner("正在生成视频..."):
+                result = generate_videos_from_plan(
+                    project_dir=proj_dir,
+                    video_name=v_name,
+                    avatar_name=a_name,
+                    render_plan_path=render_plan_path,
+                    **common_kwargs,
+                )
         st.session_state["video_result"] = result
 
 # 视频生成结果展示
 video_result = st.session_state.get("video_result")
-if video_result:
+if video_result and ("jobs" in video_result and "selected_render_jobs_count" in video_result):
+    # 批量渲染结果（一次内容计划，多次选择生成视频）
+    st.divider()
+    st.subheader("视频生成结果（批量）")
+    if video_result.get("plan_reusable"):
+        st.success(
+            f"复用现有内容计划成功，"
+            f"共渲染 {video_result.get('successful_jobs', 0)} / {video_result.get('selected_render_jobs_count', 0)} 条短视频。"
+        )
+    for warn in video_result.get("warnings", []):
+        st.warning(warn)
+    for err in video_result.get("errors", []):
+        st.error(err)
+
+    st.caption(
+        f"plan_reusable={video_result.get('plan_reusable')}  ·  "
+        f"selected_render_jobs.json：`{video_result.get('selected_render_jobs_path') or '(in-memory)'}`  ·  "
+        f"report.json 已写入 `{Path(video_result.get('project_dir', '.')) / 'report.json'}`"
+    )
+
+    for job_entry in video_result.get("jobs") or []:
+        st.markdown(f"### {job_entry.get('topic_title') or job_entry.get('topic_id')}")
+        st.caption(
+            f"topic_id={job_entry.get('topic_id')}  ·  "
+            f"video_type={job_entry.get('video_type')}  ·  "
+            f"≈ {job_entry.get('estimated_duration', '?')}s  ·  "
+            f"knowledge_points={len(job_entry.get('selected_kp_ids') or [])}"
+        )
+        for w in job_entry.get("warnings") or []:
+            st.warning(w)
+        for e in job_entry.get("errors") or []:
+            st.error(e)
+        final_path = job_entry.get("final_complete_video_path")
+        if final_path and Path(final_path).exists():
+            st.video(final_path)
+            try:
+                with open(final_path, "rb") as f:
+                    st.download_button(
+                        f"下载 {Path(final_path).name}",
+                        data=f,
+                        file_name=Path(final_path).name,
+                        mime="video/mp4",
+                        key=f"dl_topic_{job_entry.get('topic_id')}",
+                    )
+            except Exception as e:
+                st.warning(f"读取最终视频失败：{e}")
+            st.caption(f"final_complete_video_path：`{final_path}`")
+        else:
+            st.error("本方案未生成完整短视频。")
+        st.divider()
+
+    st.caption(f"项目目录：`{video_result.get('project_dir', '')}`")
+elif video_result:
     st.divider()
     st.subheader("视频生成结果")
 

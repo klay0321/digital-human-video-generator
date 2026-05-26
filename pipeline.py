@@ -1120,6 +1120,21 @@ def _generate_knowledge_modules(
         json.dumps(cleaned_segments, ensure_ascii=False, indent=2), encoding="utf-8",
     )
 
+    # Persist cleaning_report.json so downstream tools can audit how aggressive
+    # the filler/repetition removal was for this project.
+    try:
+        cleaning_report = kp.build_cleaning_report(transcript_segments, cleaned_segments)
+        cleaning_report["llm_clean_status"] = res.get("llm_clean_status")
+        cleaning_report["llm_clean_error"] = res.get("llm_clean_error")
+        cleaning_report["planning_input_text"] = "cleaned_segments"
+        cleaning_report["raw_text_used_for_planning"] = False
+        (project_dir / "cleaning_report.json").write_text(
+            json.dumps(cleaning_report, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
+        res["cleaning_report"] = cleaning_report
+    except Exception as e:
+        warnings.append(f"写入 cleaning_report.json 失败：{e}")
+
     # Stage 2: cluster into modules
     try:
         plan_template = _read_prompt_file(prompts_dir, "plan_knowledge_modules.md")
@@ -1545,6 +1560,7 @@ def _finish_knowledge_module_plan(result, project_dir, debug_dir,
     result["cleaned_text"] = km_out["cleaned_text"]
     result["cleaned_segments"] = km_out["cleaned_segments"]
     result["knowledge_modules"] = km_out["knowledge_modules"]
+    result["cleaning_report"] = km_out.get("cleaning_report") or {}
     result["llm_clean_status"] = km_out.get("llm_clean_status")
     result["llm_plan_status"] = km_out.get("llm_plan_status")
     result["llm_model"] = km_out.get("llm_model")
@@ -1642,28 +1658,74 @@ def _finish_knowledge_module_plan(result, project_dir, debug_dir,
         (project_dir / f"{cid}_voice_script.txt").write_text(
             clip.get("voice_script", "") or "", encoding="utf-8")
 
-    # Default selected_render_plan covers the first recommended hook and is a
-    # single complete video. The UI can later overwrite it with user choices.
+    # Default selected_render_plan now follows the first video_topic so the
+    # initial render aligns with the topic the user sees in the UI. We still
+    # capture big_hook metadata for backwards compatibility.
+    default_topic = {}
     default_hook = {}
     default_kp_ids = []
     if isinstance(result["knowledge_modules"], dict):
-        default_hook = (result["knowledge_modules"].get("big_hooks") or [{}])[0]
-        default_kp_ids = default_hook.get("recommended_kp_ids") or []
+        topics = result["knowledge_modules"].get("video_topics") or []
+        if topics:
+            default_topic = topics[0]
+            default_kp_ids = default_topic.get("recommended_kp_ids") or []
+        if not default_kp_ids:
+            default_hook = (result["knowledge_modules"].get("big_hooks") or [{}])[0]
+            default_kp_ids = default_hook.get("recommended_kp_ids") or []
     initial_plan = kp.build_selected_render_plan(
         default_kp_ids, [], result["knowledge_modules"],
         fragment_order="user_order" if default_kp_ids else "source_time", voice_style=voice_style,
-        title="全部模块（默认）",
+        title=(default_topic.get("topic_title") or default_hook.get("hook_title") or "默认短视频方案"),
     )
     initial_plan["render_output_mode"] = "single_complete_video"
-    initial_plan["selected_hook_id"] = default_hook.get("hook_id")
-    initial_plan["selected_hook_ids"] = [default_hook.get("hook_id")] if default_hook.get("hook_id") else []
+    initial_plan["selected_topic_id"] = default_topic.get("topic_id")
+    initial_plan["selected_hook_id"] = default_topic.get("source_hook_id") or default_hook.get("hook_id")
+    initial_plan["selected_hook_ids"] = [initial_plan["selected_hook_id"]] if initial_plan.get("selected_hook_id") else []
     initial_plan["selected_kp_ids"] = [unit.get("kp_id") for unit in initial_plan.get("render_units") or []]
-    initial_plan["final_video_title"] = default_hook.get("hook_title")
-    initial_plan["final_video_opening_hook"] = default_hook.get("opening_hook")
+    initial_plan["final_video_title"] = default_topic.get("topic_title") or default_hook.get("hook_title")
+    initial_plan["final_video_opening_hook"] = default_topic.get("topic_hook") or default_hook.get("opening_hook")
     initial_plan["final_video_structure"] = "按所选知识点顺序讲解"
+    initial_plan["video_type"] = default_topic.get("video_type") or "short_video"
     initial_plan["visible_output_count"] = 1
     (project_dir / "selected_render_plan.json").write_text(
         json.dumps(initial_plan, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Persist video_topics.json and render_jobs.json so future renderings can
+    # reuse this plan without re-running STT or LLM planning.
+    km_for_files = result["knowledge_modules"] if isinstance(result["knowledge_modules"], dict) else {}
+    topics_payload = {
+        "project_id": result["project_id"],
+        "voice_style": voice_style,
+        "source_summary": km_for_files.get("source_summary") or {},
+        "video_topics_count": len(km_for_files.get("video_topics") or []),
+        "video_topics": km_for_files.get("video_topics") or [],
+        "video_topics_targets": km_for_files.get("video_topics_targets") or {},
+        "user_visible_kp_ids": km_for_files.get("user_visible_kp_ids") or [],
+        "advanced_kp_ids": km_for_files.get("advanced_kp_ids") or [],
+        "kp_cap_summary": km_for_files.get("kp_cap_summary") or {},
+    }
+    (project_dir / "video_topics.json").write_text(
+        json.dumps(topics_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    jobs_payload = kp.build_render_jobs_from_topics(
+        km_for_files, voice_style=voice_style, project_id=result["project_id"],
+    )
+    jobs_payload["project_id"] = result["project_id"]
+    jobs_payload["plan_reusable"] = bool(jobs_payload.get("render_jobs"))
+    jobs_payload["video_topics_count"] = topics_payload["video_topics_count"]
+    (project_dir / "render_jobs.json").write_text(
+        json.dumps(jobs_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    result["video_topics_count"] = topics_payload["video_topics_count"]
+    result["render_jobs_count"] = jobs_payload["render_jobs_count"]
+    result["plan_reusable"] = jobs_payload["plan_reusable"]
+    result["video_topics_path"] = str(project_dir / "video_topics.json")
+    result["render_jobs_path"] = str(project_dir / "render_jobs.json")
+    # Data-flow provenance: report.json downstream relies on these flags.
+    result["planning_input_text"] = "cleaned_segments"
+    result["raw_text_used_for_planning"] = False
+    result["filler_words_removed"] = bool(
+        (result.get("cleaning_report") or {}).get("filler_words_removed", True)
+    )
 
     # Validate.
     try:
@@ -2133,10 +2195,12 @@ def generate_videos_from_plan(
         "clips": [],
         "render_plan_used": render_plan_path,
         "output_mode": "multiple_kp_videos",
+        "selected_topic_id": None,
         "selected_hook_id": None,
         "final_video_title": None,
         "final_video_opening_hook": None,
         "selected_kp_ids": [],
+        "plan_reusable": True,
         "unit_count": 0,
         "intermediate_unit_videos": [],
         "final_complete_video_path": None,
@@ -2145,6 +2209,10 @@ def generate_videos_from_plan(
         "final_video_has_digital_human": False,
         "tts_text_source": "voice_script",
         "subtitle_text_source": "subtitle_lines",
+        "subtitle_uses_same_text_as_tts": True,
+        "planning_input_text": "cleaned_segments",
+        "raw_text_used_for_planning": False,
+        "filler_words_removed": True,
         "llm_plan_repaired": False,
         "llm_plan_repair_reason": "none",
         "used_deterministic_fallback": False,
@@ -2199,6 +2267,7 @@ def generate_videos_from_plan(
             render_output_mode = rp.get("render_output_mode") or "multiple_kp_videos"
             selected_hook_id = rp.get("selected_hook_id") or (rp.get("selected_hook_ids") or [None])[0]
             result["output_mode"] = render_output_mode
+            result["selected_topic_id"] = rp.get("selected_topic_id")
             result["selected_hook_id"] = selected_hook_id
             result["final_video_title"] = rp.get("final_video_title") or rp.get("title")
             result["final_video_opening_hook"] = rp.get("final_video_opening_hook")
@@ -2251,9 +2320,13 @@ def generate_videos_from_plan(
             selected_render_plan=render_plan,
             require_assembly=False,
         )
-        if render_plan is not None and not selected_hook_id:
+        if render_plan is not None and not (
+            render_plan.get("selected_topic_id")
+            or selected_hook_id
+            or render_plan.get("selected_kp_ids")
+        ):
             ok = False
-            gate_reasons.append("必须选择一个 big_hook")
+            gate_reasons.append("必须选择一个短视频方案")
         result["knowledge_plan_quality_gate"] = {
             "can_enter_video_generation": ok,
             "blocking_reasons": gate_reasons,
@@ -2281,6 +2354,11 @@ def generate_videos_from_plan(
         computed = compute_layout(vw, vh, layout_config)
         result["computed_layout"] = computed
         result["layout_warnings"] = computed.get("warnings", [])
+        try:
+            from services.layout_engine import estimate_subtitle_layout_report
+            result["subtitle_layout"] = estimate_subtitle_layout_report(computed)
+        except Exception as e:
+            result["layout_warnings"].append(f"subtitle_layout 计算失败: {e}")
     except Exception as e:
         result["layout_warnings"].append(f"布局计算失败: {e}")
 
@@ -2636,23 +2714,28 @@ def generate_videos_from_plan(
 
     if render_output_mode == "single_complete_video":
         rendered_clips = [c for c in result["clips"] if c.get("final_video") and Path(c.get("final_video")).exists()]
+        # Per-topic file naming keeps batch renderings from clobbering each
+        # other when multiple topics share final_videos/ and intermediate_units/.
+        selected_topic_id = (render_plan or {}).get("selected_topic_id") if render_plan_path else None
+        topic_part = selected_topic_id or selected_hook_id or "selected_hook"
+        safe_topic = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(topic_part)) or "selected_hook"
         intermediate_paths = []
         for idx, clip_report in enumerate(rendered_clips, 1):
-            unit_path = intermediate_dir / f"unit_{idx:03d}.mp4"
+            unit_path = intermediate_dir / f"{safe_topic}_unit_{idx:03d}.mp4"
             try:
                 shutil.copyfile(clip_report["final_video"], unit_path)
                 intermediate_paths.append(str(unit_path))
             except Exception as e:
-                result["errors"].append(f"unit_{idx:03d}: 中间视频写入失败: {e}")
+                result["errors"].append(f"{safe_topic}_unit_{idx:03d}: 中间视频写入失败: {e}")
         if intermediate_paths:
-            hook_part = selected_hook_id or "selected_hook"
-            safe_hook = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in hook_part)
-            final_complete = final_videos_dir / f"{safe_hook}_complete_video.mp4"
+            final_complete = final_videos_dir / f"{safe_topic}_complete_video.mp4"
             try:
                 concat_videos(intermediate_paths, str(final_complete))
                 result["final_complete_video_path"] = str(final_complete)
             except Exception as e:
                 result["errors"].append(f"完整视频拼接失败: {e}")
+        result["selected_topic_id"] = selected_topic_id
+        result["topic_safe_id"] = safe_topic
         result["intermediate_unit_videos"] = intermediate_paths
         result["unit_count"] = len(intermediate_paths)
         result["final_video_count_visible_to_user"] = 1 if result.get("final_complete_video_path") else 0
@@ -2704,6 +2787,242 @@ def generate_videos_from_plan(
     (project_dir / "report.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Batch render: 一次内容计划，多次选择生成视频
+# ─────────────────────────────────────────────────────────────────────────────
+def generate_videos_from_render_jobs(
+    project_dir,
+    video_name,
+    avatar_name,
+    selected_render_jobs_path=None,
+    selected_render_jobs=None,
+    progress_callback=None,
+    **kwargs,
+):
+    """Render multiple short videos from a precomputed render_jobs selection.
+
+    No STT, no LLM planning happens here. The function reads
+    selected_render_jobs.json (or the equivalent dict) and, for each job, writes
+    a per-job render plan to ``selected_render_plans/<topic_id>.json`` then
+    invokes ``generate_videos_from_plan`` once per job. Each job produces an
+    independent ``final_complete_video.mp4``. Aggregated results land in
+    ``report.json`` with ``plan_reusable=True``.
+    """
+    project_dir = Path(project_dir)
+    plan_files_exist = (project_dir / "clips.json").exists() and (project_dir / "knowledge_modules.json").exists()
+    batch_result = {
+        "project_dir": str(project_dir),
+        "plan_reusable": True,
+        "planning_input_text": "cleaned_segments",
+        "raw_text_used_for_planning": False,
+        "filler_words_removed": True,
+        "tts_text_source": "voice_script",
+        "subtitle_text_source": "subtitle_lines",
+        "subtitle_uses_same_text_as_tts": True,
+        "selected_render_jobs_path": selected_render_jobs_path,
+        "selected_render_jobs_count": 0,
+        "successful_jobs": 0,
+        "failed_jobs": 0,
+        "jobs": [],
+        "final_videos": [],
+        "warnings": [],
+        "errors": [],
+    }
+    if not plan_files_exist:
+        batch_result["errors"].append("未找到 clips.json / knowledge_modules.json，请先生成内容计划")
+        (project_dir / "report.json").write_text(
+            json.dumps(batch_result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return batch_result
+
+    if selected_render_jobs is None:
+        if not selected_render_jobs_path:
+            batch_result["errors"].append("未提供 selected_render_jobs_path 或 selected_render_jobs")
+            (project_dir / "report.json").write_text(
+                json.dumps(batch_result, ensure_ascii=False, indent=2), encoding="utf-8")
+            return batch_result
+        try:
+            selected_render_jobs = json.loads(Path(selected_render_jobs_path).read_text(encoding="utf-8"))
+        except Exception as e:
+            batch_result["errors"].append(f"读取 selected_render_jobs 失败: {e}")
+            (project_dir / "report.json").write_text(
+                json.dumps(batch_result, ensure_ascii=False, indent=2), encoding="utf-8")
+            return batch_result
+
+    # Schema validation (fail fast before any heavy rendering kicks off).
+    ok, reasons, validation_metrics = kp.validate_selected_render_jobs(selected_render_jobs or {})
+    batch_result["selected_render_jobs_validation"] = {
+        "ok": ok,
+        "reasons": reasons,
+        **validation_metrics,
+    }
+    if not ok:
+        batch_result["errors"].extend(reasons)
+        (project_dir / "report.json").write_text(
+            json.dumps(batch_result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return batch_result
+
+    jobs = (selected_render_jobs or {}).get("render_jobs") or []
+    batch_result["selected_render_jobs_count"] = len(jobs)
+
+    per_job_plan_dir = project_dir / "selected_render_plans"
+    per_job_plan_dir.mkdir(exist_ok=True)
+
+    def _notify_progress(stage, **extra):
+        if callable(progress_callback):
+            try:
+                progress_callback({"stage": stage, **extra})
+            except Exception:
+                pass
+
+    _notify_progress("batch_start", total_jobs=len(jobs))
+
+    for job_index, job in enumerate(jobs, 1):
+        topic_id = job.get("topic_id") or job.get("job_id") or "topic"
+        safe_topic = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(topic_id)) or "topic"
+        _notify_progress(
+            "job_start",
+            current_job=job_index,
+            total_jobs=len(jobs),
+            topic_id=topic_id,
+            topic_title=job.get("topic_title") or topic_id,
+            successful_jobs=batch_result["successful_jobs"],
+            failed_jobs=batch_result["failed_jobs"],
+        )
+        per_job_plan_path = per_job_plan_dir / f"{safe_topic}.json"
+        per_job_plan = {
+            "selected_topic_id": topic_id,
+            "selected_hook_id": job.get("selected_hook_id"),
+            "selected_hook_ids": [job.get("selected_hook_id")] if job.get("selected_hook_id") else [],
+            "selected_kp_ids": job.get("selected_kp_ids") or [],
+            "render_units": job.get("render_units") or [],
+            "render_output_mode": "single_complete_video",
+            "fragment_order": job.get("fragment_order") or "user_order",
+            "voice_style": job.get("voice_style"),
+            "title": job.get("topic_title") or topic_id,
+            "final_video_title": job.get("final_video_title") or job.get("topic_title") or topic_id,
+            "final_video_opening_hook": job.get("final_video_opening_hook") or job.get("topic_hook") or "",
+            "final_video_structure": job.get("final_video_structure") or "按所选知识点顺序讲解",
+            "video_type": job.get("video_type") or "short_video",
+            "visible_output_count": 1,
+        }
+        per_job_plan_path.write_text(
+            json.dumps(per_job_plan, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        sub_kwargs = dict(kwargs)
+        if job.get("voice_style"):
+            sub_kwargs["voice_style"] = job["voice_style"]
+        try:
+            job_result = generate_videos_from_plan(
+                project_dir=project_dir,
+                video_name=video_name,
+                avatar_name=avatar_name,
+                render_plan_path=str(per_job_plan_path),
+                **sub_kwargs,
+            )
+        except Exception as e:
+            batch_result["failed_jobs"] += 1
+            batch_result["jobs"].append({
+                "job_id": job.get("job_id"),
+                "topic_id": topic_id,
+                "topic_title": job.get("topic_title"),
+                "final_complete_video_path": None,
+                "errors": [f"渲染异常: {e}"],
+                "warnings": [],
+            })
+            batch_result["errors"].append(f"{topic_id}: 渲染异常 {e}")
+            _notify_progress(
+                "job_done",
+                current_job=job_index,
+                total_jobs=len(jobs),
+                topic_id=topic_id,
+                topic_title=job.get("topic_title") or topic_id,
+                succeeded=False,
+                successful_jobs=batch_result["successful_jobs"],
+                failed_jobs=batch_result["failed_jobs"],
+            )
+            continue
+
+        if not batch_result.get("subtitle_layout") and job_result.get("subtitle_layout"):
+            batch_result["subtitle_layout"] = job_result["subtitle_layout"]
+        final_video = job_result.get("final_complete_video_path")
+        succeeded = bool(final_video) and Path(final_video).exists() and not job_result.get("errors")
+        if succeeded:
+            batch_result["successful_jobs"] += 1
+            batch_result["final_videos"].append(final_video)
+        else:
+            batch_result["failed_jobs"] += 1
+        batch_result["jobs"].append({
+            "job_id": job.get("job_id"),
+            "topic_id": topic_id,
+            "topic_title": job.get("topic_title"),
+            "video_type": job.get("video_type"),
+            "selected_kp_ids": job.get("selected_kp_ids"),
+            "estimated_duration": job.get("estimated_duration"),
+            "render_plan_path": str(per_job_plan_path),
+            "final_complete_video_path": final_video,
+            "final_video_count_visible_to_user": job_result.get("final_video_count_visible_to_user"),
+            "intermediate_unit_videos": job_result.get("intermediate_unit_videos") or [],
+            "tts_text_source": job_result.get("tts_text_source"),
+            "subtitle_text_source": job_result.get("subtitle_text_source"),
+            "warnings": job_result.get("warnings") or [],
+            "errors": job_result.get("errors") or [],
+        })
+        batch_result["warnings"].extend([f"{topic_id}: {w}" for w in (job_result.get("warnings") or [])])
+        batch_result["errors"].extend([f"{topic_id}: {e}" for e in (job_result.get("errors") or [])])
+        _notify_progress(
+            "job_done",
+            current_job=job_index,
+            total_jobs=len(jobs),
+            topic_id=topic_id,
+            topic_title=job.get("topic_title") or topic_id,
+            succeeded=succeeded,
+            successful_jobs=batch_result["successful_jobs"],
+            failed_jobs=batch_result["failed_jobs"],
+            final_complete_video_path=final_video,
+        )
+
+    _notify_progress(
+        "batch_done",
+        total_jobs=len(jobs),
+        successful_jobs=batch_result["successful_jobs"],
+        failed_jobs=batch_result["failed_jobs"],
+    )
+
+    # Aggregate TTS / subtitle provenance across the batch so the on-disk
+    # report still tells the truth when one job had to fall back to raw_text.
+    job_tts_sources = {j.get("tts_text_source") for j in batch_result["jobs"] if j.get("tts_text_source")}
+    job_subtitle_sources = {j.get("subtitle_text_source") for j in batch_result["jobs"] if j.get("subtitle_text_source")}
+    if job_tts_sources and job_tts_sources != {"voice_script"}:
+        batch_result["tts_text_source"] = "mixed"
+        batch_result["warnings"].append("某些 topic 的 TTS 文本不是 voice_script，请检查 jobs.warnings。")
+    if job_subtitle_sources and job_subtitle_sources != {"subtitle_lines"}:
+        batch_result["subtitle_text_source"] = "mixed"
+        batch_result["warnings"].append("某些 topic 的字幕不是来自 subtitle_lines，请检查 jobs.warnings。")
+    batch_result["subtitle_uses_same_text_as_tts"] = (
+        batch_result["tts_text_source"] == "voice_script"
+        and batch_result["subtitle_text_source"] == "subtitle_lines"
+    )
+
+    # Read cleaning_report.json (written at plan time) to keep provenance
+    # accurate even if user reused a plan after switching cleaning modes.
+    cleaning_path = project_dir / "cleaning_report.json"
+    if cleaning_path.exists():
+        try:
+            cleaning_report = json.loads(cleaning_path.read_text(encoding="utf-8"))
+            batch_result["filler_words_removed"] = bool(cleaning_report.get("filler_words_removed", True))
+            batch_result["planning_input_text"] = cleaning_report.get("planning_input_text") or "cleaned_segments"
+            batch_result["raw_text_used_for_planning"] = bool(cleaning_report.get("raw_text_used_for_planning", False))
+        except Exception:
+            pass
+
+    # The batch report overrides the per-job report.json written by the last
+    # generate_videos_from_plan call so the on-disk report reflects the whole
+    # batch rather than the final job alone.
+    (project_dir / "report.json").write_text(
+        json.dumps(batch_result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return batch_result
 
 
 # ─────────────────────────────────────────────────────────────────────────────

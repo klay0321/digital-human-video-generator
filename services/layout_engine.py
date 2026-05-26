@@ -9,16 +9,24 @@ from services.ffmpeg_utils import _cmd
 
 @dataclass
 class LayoutConfig:
-    layout_mode: str = "right_avatar_left_subtitle"
+    layout_mode: str = "right_avatar_bottom_center_subtitle"
 
     avatar_scale: float = 0.14
     avatar_margin_right: int = 24
     avatar_margin_bottom: int = 100
 
-    subtitle_size: int = 20
+    subtitle_size: int = 28
     subtitle_margin_left: int = 36
-    subtitle_margin_bottom: int = 40
-    subtitle_max_width_ratio: float = 0.55
+    subtitle_margin_bottom: int = 80
+    subtitle_max_width_ratio: float = 0.62
+
+    # New visual controls (round 4): centered subtitles + adjustable outline /
+    # shadow / box.
+    subtitle_align: str = "center"          # "center" | "left" | "right"
+    subtitle_outline_width: float = 2.5     # ASS Outline (px)
+    subtitle_shadow_depth: float = 1.0      # ASS Shadow (px)
+    subtitle_show_box: bool = False         # True → BorderStyle=3 半透明背景
+    subtitle_box_opacity: int = 140         # 0..255, 越大越不透明
 
     title_size: int = 28
     title_margin_left: int = 32
@@ -50,9 +58,16 @@ def probe_video_size(video_path):
 def compute_layout(width, height, config):
     """Compute pixel positions for avatar / subtitle / title.
 
-    Guarantees:
-      subtitle_x + subtitle_width <= avatar_x - safe_gap = subtitle_right_limit
-    Auto-shrinks subtitle_width to satisfy this and emits a warning if it had to.
+    Subtitle layout policy (round-4):
+      * Anchor is **bottom-center** by default (Alignment=2 in ASS).
+      * Horizontal width is constrained so the subtitle box never enters the
+        avatar safe-region (subtitle_right_limit = avatar_x - safe_gap).
+      * When the avatar pushes the available area, the subtitle box stays
+        centered inside the available area; we accept a small visual offset
+        to the left rather than overlapping the avatar.
+      * The function returns `subtitle_align`, `subtitle_anchor_x` and
+        `subtitle_center_x` so the renderer can emit the correct ASS \\pos
+        without duplicating the math.
     """
     warnings = []
 
@@ -61,36 +76,54 @@ def compute_layout(width, height, config):
     avatar_x = width - avatar_w - config.avatar_margin_right
     avatar_y = height - avatar_w - config.avatar_margin_bottom
 
-    # 2. Subtitle horizontal range with explicit right limit.
+    # 2. Available horizontal range for the subtitle, excluding the avatar.
     subtitle_right_limit = avatar_x - config.safe_gap
+    avail_left = config.subtitle_margin_left
+    avail_right = subtitle_right_limit
+    avail_width = max(0, avail_right - avail_left)
 
-    sub_x = config.subtitle_margin_left
     max_w_by_ratio = int(width * config.subtitle_max_width_ratio)
-    max_w_by_safe = subtitle_right_limit - sub_x
-
-    if max_w_by_safe < 100:
-        # Pathological: avatar so close to left edge that nothing fits.
-        sub_w = max(100, max_w_by_safe)  # may still overflow; we warn below
+    if avail_width < 100:
         warnings.append(
-            f"avatar overlaps subtitle area: subtitle_right_limit={subtitle_right_limit}, "
-            f"subtitle_x={sub_x}; reduce avatar size or margins."
+            f"avatar overlaps subtitle area: avail_right={avail_right}, "
+            f"avail_left={avail_left}; reduce avatar size or margins."
         )
+        sub_w = max(100, avail_width)
     else:
-        sub_w = min(max_w_by_ratio, max_w_by_safe)
-        if max_w_by_ratio > max_w_by_safe:
+        sub_w = min(max_w_by_ratio, avail_width)
+        if max_w_by_ratio > avail_width:
             warnings.append(
                 f"subtitle_width auto-shrunk from {max_w_by_ratio} to {sub_w} "
                 f"to keep clear of avatar (right_limit={subtitle_right_limit})."
             )
 
-    # Hard guarantee
-    if sub_x + sub_w > subtitle_right_limit and max_w_by_safe >= 100:
-        sub_w = subtitle_right_limit - sub_x
+    align = (config.subtitle_align or "center").lower()
+    if align not in {"center", "left", "right"}:
+        align = "center"
+
+    if align == "left":
+        sub_x = avail_left
+    elif align == "right":
+        sub_x = max(avail_left, avail_right - sub_w)
+    else:  # center: keep the subtitle box centered inside the available area.
+        sub_x = max(avail_left, avail_left + (avail_width - sub_w) // 2)
+
+    # Hard guarantee.
+    if sub_x + sub_w > avail_right and avail_width >= 100:
+        sub_x = max(avail_left, avail_right - sub_w)
 
     if sub_w < 200:
         warnings.append(
             f"subtitle width is narrow ({sub_w}px); long lines will wrap frequently."
         )
+
+    subtitle_center_x = sub_x + sub_w // 2
+    if align == "left":
+        subtitle_anchor_x = sub_x
+    elif align == "right":
+        subtitle_anchor_x = sub_x + sub_w
+    else:
+        subtitle_anchor_x = subtitle_center_x
 
     # 3. Title (top-left).
     title_x = config.title_margin_left
@@ -111,10 +144,69 @@ def compute_layout(width, height, config):
         "subtitle_y": subtitle_block_top,
         "subtitle_width": sub_w,
         "subtitle_right_limit": subtitle_right_limit,
+        "subtitle_align": align,
+        "subtitle_center_x": subtitle_center_x,
+        "subtitle_anchor_x": subtitle_anchor_x,
+        "subtitle_margin_bottom": margin_b,
+        "subtitle_font_size": fs,
+        "subtitle_max_lines": max(1, config.max_lines_per_dialogue),
+        "subtitle_outline_width": float(getattr(config, "subtitle_outline_width", 2.5) or 2.5),
+        "subtitle_shadow_depth": float(getattr(config, "subtitle_shadow_depth", 1.0) or 1.0),
+        "subtitle_show_box": bool(getattr(config, "subtitle_show_box", False)),
+        "subtitle_box_opacity": int(getattr(config, "subtitle_box_opacity", 140) or 0),
         "title_x": title_x,
         "title_y": title_y,
         "warnings": warnings,
     }
+
+
+def estimate_subtitle_layout_report(layout):
+    """Return a compact subtitle_layout block suitable for report.json."""
+    if not isinstance(layout, dict):
+        return {}
+    align = layout.get("subtitle_align", "center")
+    return {
+        "position": "bottom_center_safe" if align == "center" else (
+            "bottom_left_safe" if align == "left" else "bottom_right_safe"
+        ),
+        "align": align,
+        "max_lines": int(layout.get("subtitle_max_lines", 2)),
+        "font_size": int(layout.get("subtitle_font_size", 28)),
+        "outline_width": float(layout.get("subtitle_outline_width", 2.5)),
+        "shadow_depth": float(layout.get("subtitle_shadow_depth", 1.0)),
+        "show_box": bool(layout.get("subtitle_show_box", False)),
+        "box_opacity": int(layout.get("subtitle_box_opacity", 140)),
+        "margin_bottom": int(layout.get("subtitle_margin_bottom", 80)),
+        "avoid_digital_human_window": True,
+        "max_chars_per_line": int(
+            max(8, layout.get("subtitle_width", 0) // max(1, layout.get("subtitle_font_size", 28)))
+        ),
+        "computed_box": {
+            "x": int(layout.get("subtitle_x", 0)),
+            "y": int(layout.get("subtitle_y", 0)),
+            "width": int(layout.get("subtitle_width", 0)),
+            "right_limit": int(layout.get("subtitle_right_limit", 0)),
+            "anchor_x": int(layout.get("subtitle_anchor_x", 0)),
+            "center_x": int(layout.get("subtitle_center_x", 0)),
+        },
+    }
+
+
+def estimate_subtitle_font_size(width):
+    """Suggest a default subtitle font size based on the resolution."""
+    try:
+        w = int(width or 0)
+    except Exception:
+        w = 0
+    if w >= 1920:
+        return 30
+    if w >= 1280:
+        return 24
+    if w >= 720:
+        return 20
+    if w >= 480:
+        return 16
+    return 18
 
 
 def _escape_ffmpeg_text(text):
@@ -163,8 +255,23 @@ def _ass_time(seconds):
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+def _alignment_code(align):
+    return {"left": 1, "center": 2, "right": 3}.get((align or "center").lower(), 2)
+
+
+def _ass_back_color(opacity_0_255):
+    """Encode a black backdrop with the requested opacity into ASS BackColour.
+
+    ASS colour is &HAABBGGRR where AA is *transparency* (0=opaque, 255=fully
+    transparent). The caller passes "opacity" (255 = fully opaque) so we flip.
+    """
+    opacity = max(0, min(255, int(opacity_0_255 or 0)))
+    alpha = 255 - opacity
+    return f"&H{alpha:02X}000000"
+
+
 def make_ass_subtitle_for_clip(text, output_path, duration, layout, config):
-    """Generate an ASS subtitle file anchored to the bottom-left safe area.
+    """Generate an ASS subtitle file anchored to the bottom-CENTER safe area.
 
     Strategy (must match preview EXACTLY):
       * Hard-wrap the text in Python — never rely on ASS auto-wrap when using
@@ -174,8 +281,9 @@ def make_ass_subtitle_for_clip(text, output_path, duration, layout, config):
       * Each Dialogue holds at most config.max_lines_per_dialogue lines
         (joined with \\N). If the text needs more lines, we split into
         multiple Dialogues across time.
-      * Bottom-left anchor (Alignment=1) at (subtitle_x, video_height -
-        subtitle_margin_bottom).
+      * Alignment / anchor follow layout["subtitle_align"] from compute_layout.
+        Default is bottom-center → ASS Alignment=2 with \\pos(center_x, bottom).
+      * Outline / shadow / background opacity are configurable.
     """
     output_path = str(Path(output_path))
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -187,6 +295,17 @@ def make_ass_subtitle_for_clip(text, output_path, duration, layout, config):
     vid_h = layout["video_height"]
     margin_b = config.subtitle_margin_bottom
     max_lines = max(1, getattr(config, "max_lines_per_dialogue", 2))
+
+    align = layout.get("subtitle_align") or getattr(config, "subtitle_align", "center")
+    alignment_code = _alignment_code(align)
+    anchor_x = layout.get("subtitle_anchor_x") or layout.get("subtitle_center_x") or (sub_x + sub_w // 2)
+
+    outline = float(getattr(config, "subtitle_outline_width", 2.5) or 2.5)
+    shadow = float(getattr(config, "subtitle_shadow_depth", 1.0) or 0.0)
+    show_box = bool(getattr(config, "subtitle_show_box", False))
+    box_opacity = int(getattr(config, "subtitle_box_opacity", 140) or 0)
+    border_style = 3 if show_box else 1
+    back_colour = _ass_back_color(box_opacity if show_box else 128)
 
     # CJK-conservative wrap (the audit found the old fs/2 estimate caused overflow).
     max_chars_per_line = max(8, sub_w // fs)
@@ -215,7 +334,7 @@ def make_ass_subtitle_for_clip(text, output_path, duration, layout, config):
     safe_duration = duration if duration and duration > 0 else max(1.0, n * 2.0)
     per = safe_duration / n
 
-    # 5. Anchor: alignment=1 = bottom-left, \pos sets that anchor point.
+    # 5. Anchor coordinates.
     pos_y = vid_h - margin_b
 
     header = f"""[Script Info]
@@ -228,7 +347,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Microsoft YaHei,{fs},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,1,{sub_x},200,{margin_b},1
+Style: Default,Microsoft YaHei,{fs},&H00FFFFFF,&H000000FF,&H00000000,{back_colour},0,0,0,0,100,100,0,0,{border_style},{outline:.2f},{shadow:.2f},{alignment_code},{int(sub_x)},{max(0, vid_w - (sub_x + sub_w))},{margin_b},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -238,7 +357,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for i, block in enumerate(dialogues):
         start = i * per
         end = (i + 1) * per
-        styled = f"{{\\pos({sub_x},{pos_y})}}{block}"
+        styled = f"{{\\pos({int(anchor_x)},{int(pos_y)})}}{block}"
         events.append(
             f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Default,,0,0,0,,{styled}"
         )
